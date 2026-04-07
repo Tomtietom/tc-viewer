@@ -696,9 +696,9 @@ function exportCSV() {
 }
 
 // === TRIMBLE CONNECT API ===
-// Endpoints worden dynamisch bepaald op basis van regio
-let TC_BASE = '';
-let PSET_BASE = '';
+// Endpoints - default Europe (meeste NL projecten)
+let TC_BASE = 'https://app21.connect.trimble.com/tc/api/2.0';
+let PSET_BASE = 'https://pset-api.eu-west-1.connect.trimble.com/v1';
 let tcToken = '';
 
 const REGIONS_URL = 'https://app.connect.trimble.com/tc/api/2.0/regions';
