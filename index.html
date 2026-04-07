@@ -696,9 +696,26 @@ function exportCSV() {
 }
 
 // === TRIMBLE CONNECT API ===
-const TC_BASE = 'https://app.connect.trimble.com/tc/api/2.0';
-const PSET_BASE = 'https://pset-api.connect.trimble.com/v1';
+// Endpoints worden dynamisch bepaald op basis van regio
+let TC_BASE = '';
+let PSET_BASE = '';
 let tcToken = '';
+
+const REGIONS_URL = 'https://app.connect.trimble.com/tc/api/2.0/regions';
+const REGION_MAP = {
+  europe:    { tc: 'https://app21.connect.trimble.com/tc/api/2.0', pset: 'https://pset-api.eu-west-1.connect.trimble.com/v1' },
+  northAmerica: { tc: 'https://app.connect.trimble.com/tc/api/2.0', pset: 'https://pset-api.us-east-1.connect.trimble.com/v1' },
+  asia:      { tc: 'https://app31.connect.trimble.com/tc/api/2.0', pset: 'https://pset-api.ap-southeast-1.connect.trimble.com/v1' },
+  australia: { tc: 'https://app32.connect.trimble.com/tc/api/2.0', pset: 'https://pset-api.ap-southeast-2.connect.trimble.com/v1' },
+};
+
+async function detectRegion(projectLocation) {
+  const loc = (projectLocation || 'europe').toLowerCase();
+  const r = REGION_MAP[loc] || REGION_MAP.europe;
+  TC_BASE = r.tc;
+  PSET_BASE = r.pset;
+  console.log(`[TC] Regio: ${loc} ‚Üí API: ${TC_BASE}`);
+}
 
 async function tcGet(url, params) {
   const u = new URL(url);
@@ -756,7 +773,7 @@ async function tcGetMetadata(projectId, bestanden) {
   }
   console.log(`[TC] ${defs.length} property set definities gevonden`);
 
-  // Maak een lookup van bestandsnaam → bestand-object
+  // Maak een lookup van bestandsnaam ‚Üí bestand-object
   const lookup = {};
   bestanden.forEach(b => { lookup[b._vid] = b; });
 
@@ -870,7 +887,7 @@ async function initTC() {
     return;
   }
 
-  console.log('[Viewer] TC extensie modus — verbinden...');
+  console.log('[Viewer] TC extensie modus ‚Äî verbinden...');
   try {
     tcAPI = await TrimbleConnectWorkspace.connect(window.parent, (event, data) => {
       console.log('[Viewer] TC event:', event, data);
@@ -886,13 +903,15 @@ async function initTC() {
 
     console.log('[Viewer] Verbonden met TC Workspace API');
 
-    // Haal project-info op
+    // Haal project-info op + detecteer regio
     if (tcAPI.project && tcAPI.project.getProject) {
       const project = await tcAPI.project.getProject();
       if (project) {
         pid = project.id || '';
+        const projectLocation = project.location || 'europe';
         document.getElementById('hdrInfo').textContent = project.name || '';
-        console.log(`[Viewer] Project: ${project.name} (${pid})`);
+        console.log(`[Viewer] Project: ${project.name} (${pid}) locatie: ${projectLocation}`);
+        await detectRegion(projectLocation);
       }
     }
 
