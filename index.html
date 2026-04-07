@@ -959,7 +959,11 @@ async function initTC() {
         </div>
       `;
       const ok = await laadVanuitTC();
-      if (ok) toonDashboard();
+      if (ok) {
+        // Ga direct naar dashboard zonder pidInput te lezen
+        goTo('pgDash');
+        renderDash();
+      }
     }
 
   } catch(e) {
