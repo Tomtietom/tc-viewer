@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Documentenlijst Viewer | At Fielt</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAJZJREFUWEft1DEKwCAQRdHx/peOhYVFCi1cwEIS0E5m+PPrVTq5e/9e3T3T+34fp/tnJoCZBECSJEmSJEmSJGlJANd9v3rv+xGA+wSQJEmSJEmS/ncAz8eSJEmSJEmStCSA53NJkiRJkiRJSwJ4PpckSZIkSZK0JIDnc0mSJEmSJElLAng+lyRJkiRJkrQkgOdzSZIkSZL+ewBfYCl0Id3cvQAAAABJRU5ErkJggg==">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="xlsx.full.min.js"></script>
+<script src="workspace-api.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Poppins',-apple-system,BlinkMacSystemFont,sans-serif;background:#f9f9f9;color:#222;min-height:100vh}
+:root{--af:#d4821a;--af2:#ec5d0e;--afl:#fef5eb;--dk:#222;--gr:#f5f0ea;--ok:#2d6a4f;--okbg:#d4edda;--info:#004085;--infobg:#cce5ff;--warn:#c0392b}
+
+/* Header */
+.hdr{background:var(--dk);color:#fff;padding:12px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);position:sticky;top:0;z-index:100}
+.hdr h1{font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;white-space:nowrap}
+.hdr .sub{font-size:12px;opacity:.5;margin-left:4px;font-weight:400}
+.hdr .info{font-size:12px;opacity:.7;margin-left:12px}
+.hdr .spacer{flex:1}
+.hdr .back-btn{padding:5px 14px;background:rgba(255,255,255,.12);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-family:'Poppins',sans-serif;display:none}
+.hdr .back-btn:hover{background:rgba(255,255,255,.2)}
+.hdr .action-btn{padding:5px 14px;background:var(--af);color:#fff;border:none;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;display:none}
+.hdr .action-btn:hover{background:var(--af2)}
+
+/* Pages */
+.page{display:none;min-height:calc(100vh - 48px)}
+.page.active{display:block}
+.page-flex.active{display:flex}
+
+/* === UPLOAD === */
+.pg-upload{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;background:linear-gradient(180deg,#fff 0%,var(--gr) 100%)}
+.ucard{background:#fff;border-radius:14px;padding:44px;max-width:600px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.06)}
+.ucard h2{font-family:'Montserrat',sans-serif;font-size:22px;margin-bottom:4px}
+.ucard .tag{color:var(--af);font-size:13px;font-weight:500;margin-bottom:16px}
+.ucard p{color:#666;margin-bottom:20px;font-size:14px}
+
+.dz{border:2px dashed #ccc;border-radius:12px;padding:24px;margin-bottom:12px;transition:.2s;cursor:pointer}
+.dz:hover,.dz.over{border-color:var(--af);background:var(--afl)}
+.dz .ic{font-size:36px;margin-bottom:6px}
+.dz label{color:var(--af);cursor:pointer;font-weight:600}
+input[type=file]{display:none}
+
+.up-group{text-align:left;margin:12px 0;padding:14px;background:#f8f9fa;border-radius:8px}
+.up-group h3{font-size:13px;font-weight:600;margin-bottom:4px}
+.up-group .st{font-size:12px;color:#666}
+.up-group .st.ok{color:var(--ok);font-weight:500}
+.up-group .hint{font-size:11px;color:#999;margin-top:4px}
+.up-group input[type=text]{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:'Poppins',sans-serif;outline:none;margin-top:4px}
+.up-group input[type=text]:focus{border-color:var(--af)}
+
+.go-btn{padding:12px 36px;background:var(--af);color:#fff;border:none;border-radius:40px;font-size:15px;font-weight:600;font-family:'Montserrat',sans-serif;cursor:pointer;opacity:.4;transition:.2s;box-shadow:0 10px 25px rgba(212,130,26,.3);margin-top:14px}
+.go-btn:not(:disabled){opacity:1}
+.go-btn:not(:disabled):hover{background:var(--af2)}
+
+.disc{margin-top:16px;padding:12px;background:#fff8f0;border:1px solid #f0dcc8;border-radius:8px;font-size:11px;color:#8a6d3b;text-align:left;line-height:1.6}
+
+/* === DASHBOARD === */
+.pg-dash{padding:24px;overflow-y:auto;background:var(--gr)}
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px}
+.dcard{background:#fff;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.dcard h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:12px;font-family:'Montserrat',sans-serif}
+
+/* Big stats */
+.big-stats{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.bstat{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 8px rgba(0,0,0,.04);min-width:140px;flex:1}
+.bstat .lab{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.3px;font-family:'Montserrat',sans-serif}
+.bstat .val{font-size:28px;font-weight:800;font-family:'Montserrat',sans-serif;margin-top:2px}
+
+/* Donut */
+.donut-wrap{display:flex;align-items:center;gap:16px}
+.donut{width:80px;height:80px;border-radius:50%;position:relative;flex-shrink:0}
+.donut-c{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:46px;height:46px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;font-family:'Montserrat',sans-serif}
+.donut-leg{font-size:12px;line-height:2}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+
+/* Bars */
+.bar-r{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
+.bar-l{width:110px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#555}
+.bar-t{flex:1;height:18px;background:#f0ebe5;border-radius:9px;overflow:hidden}
+.bar-f{height:100%;border-radius:9px;transition:width .3s;min-width:2px}
+.bar-c{width:30px;font-weight:600;color:#555}
+
+/* Verplicht velden cards */
+.veld-card{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid #f0f0f0}
+.veld-card:last-child{border:none}
+.veld-ring{width:50px;height:50px;border-radius:50%;position:relative;flex-shrink:0}
+.veld-ring-c{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:34px;height:34px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'Montserrat',sans-serif}
+.veld-info{flex:1}
+.veld-naam{font-weight:600;font-size:13px}
+.veld-detail{font-size:11px;color:#888;margin-top:2px}
+.veld-bar{width:100%;height:6px;background:#f0ebe5;border-radius:3px;margin-top:4px;overflow:hidden}
+.veld-fill{height:100%;border-radius:3px}
+
+/* Nav card */
+.nav-btn{display:block;width:100%;padding:14px;background:var(--af);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Montserrat',sans-serif;text-align:center;margin-top:8px}
+.nav-btn:hover{background:var(--af2)}
+.nav-btn.sec{background:#fff;color:var(--dk);border:1px solid #ddd}
+.nav-btn.sec:hover{border-color:var(--af);color:var(--af)}
+
+/* === DOCUMENTEN === */
+.pg-docs{height:calc(100vh - 48px)}
+
+.sidebar{width:280px;background:#fff;border-right:1px solid #e8e0d8;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sb-sec{padding:10px 12px;border-bottom:1px solid #eee}
+.sb-sec h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:6px;font-family:'Montserrat',sans-serif}
+.sbox{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:'Poppins',sans-serif;outline:none}
+.sbox:focus{border-color:var(--af)}
+.frow{display:flex;gap:4px;margin-top:6px}
+.frow select{flex:1;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:11px;font-family:'Poppins',sans-serif;outline:none}
+
+.tree{flex:1;overflow-y:auto;padding:4px 6px}
+.tr-row{display:flex;align-items:center;padding:4px 6px;border-radius:5px;cursor:pointer;transition:background .1s;gap:3px;font-size:12px;margin-bottom:1px}
+.tr-row:hover{background:var(--gr)}
+.tr-row.act{background:var(--afl);color:var(--af);font-weight:600}
+.tr-tog{width:14px;text-align:center;font-size:8px;color:#999;flex-shrink:0;cursor:pointer;transition:transform .15s}
+.tr-tog.open{transform:rotate(90deg)}
+.tr-ico{font-size:13px;flex-shrink:0}
+.tr-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr-cnt{font-size:10px;background:#eee;color:#666;padding:1px 5px;border-radius:8px;flex-shrink:0}
+.tr-row.act .tr-cnt{background:var(--af);color:#fff}
+.tr-lnk{font-size:10px;color:#999;text-decoration:none;flex-shrink:0;opacity:0;transition:opacity .15s;padding:2px}
+.tr-row:hover .tr-lnk{opacity:1}
+.tr-lnk:hover{color:var(--af)}
+.tr-ch{margin-left:14px;overflow:hidden}
+.tr-ch.hide{display:none}
+
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.tbl-wrap{flex:1;display:flex;overflow:hidden}
+.tbl-scrl{flex:1;overflow:auto}
+
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{position:sticky;top:0;z-index:10}
+thead th{background:var(--dk);color:#fff;padding:8px 8px;text-align:left;font-weight:600;font-size:11px;white-space:nowrap;cursor:pointer;user-select:none}
+thead th:hover{background:#333}
+thead th .sa{margin-left:3px;opacity:.3;font-size:8px}
+thead th.sorted .sa{opacity:1;color:var(--af)}
+
+tbody tr{border-bottom:1px solid #f0f0f0;transition:background .1s;cursor:pointer}
+tbody tr:hover{background:var(--afl)}
+tbody tr.sel{background:#fff3e0}
+tbody tr.mn1{background:#FFF0D0}
+tbody tr.mn1 td{font-weight:700;font-size:12px;border-bottom:2px solid #e0c080;color:#8B6914;padding:6px 8px}
+tbody tr.mn2{background:#FFFDE7}
+tbody tr.mn2 td{font-weight:600;font-size:11px;border-bottom:1px solid #e0d5a0;color:#7B6C00}
+tbody tr.mn3{background:#FAFAF0}
+tbody tr.mn3 td{font-weight:500;font-size:11px;color:#999}
+td{padding:6px 8px;vertical-align:top}
+td a{color:var(--af);text-decoration:none}
+td a:hover{text-decoration:underline}
+
+.bdg{display:inline-block;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap}
+.b-def{background:var(--okbg);color:var(--ok)}
+.b-uit{background:var(--infobg);color:var(--info)}
+.b-con{background:#eee;color:#888}
+.b-ver{background:#fde8e8;color:var(--warn)}
+.b-ov{background:#f0f0f0;color:#666}
+
+.no-r{padding:40px;text-align:center;color:#999;font-size:14px}
+
+/* Detail */
+.dpan{width:300px;background:#fff;border-left:1px solid #e8e0d8;overflow-y:auto;display:none;flex-direction:column;flex-shrink:0}
+.dpan.vis{display:flex}
+.dp-hd{padding:14px 16px;border-bottom:1px solid #eee;background:var(--gr)}
+.dp-hd h3{font-size:13px;font-weight:600;font-family:'Montserrat',sans-serif;word-break:break-all}
+.dp-hd .dp-path{font-size:11px;color:#888;margin-top:3px;word-break:break-all}
+.dp-sec{padding:10px 16px;border-bottom:1px solid #f0f0f0}
+.dp-sec h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:0 0 6px;font-family:'Montserrat',sans-serif}
+.dp-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.dp-row .dl{color:#888}
+.dp-row .dv{font-weight:500;text-align:right;max-width:160px;word-break:break-all}
+.dp-tc{display:block;margin:10px 16px;padding:10px;background:var(--af);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;font-family:'Poppins',sans-serif}
+.dp-tc:hover{background:var(--af2)}
+
+.ftr{padding:5px 20px;background:#fff;border-top:1px solid #eee;font-size:11px;color:#999;display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <h1>Trimble Connect <span class="sub">Documentenlijst</span></h1>
+  <span class="info" id="hdrInfo"></span>
+  <span class="spacer"></span>
+  <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
+  <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
+</div>
+
+<!-- PAGE: UPLOAD -->
+<div class="page pg-upload active" id="pgUpload">
+  <div class="ucard">
+    <h2>Documentenlijst Viewer</h2>
+    <div class="tag">Powered by At Fielt</div>
+    <p>Upload je Trimble Connect export(s) om een interactief overzicht te krijgen.</p>
+
+    <div class="dz" id="dz1">
+      <div class="ic">&#128196;</div>
+      <div>Sleep je <strong>documentenlijst export</strong> (.xlsx met metadata)</div>
+      <div style="margin:6px 0;color:#999;font-size:12px">of</div>
+      <label for="f1">Klik om te selecteren</label>
+      <input type="file" id="f1" accept=".xlsx,.xls">
+    </div>
+
+    <div class="up-group" id="ug1" style="display:none">
+      <h3>Documentenlijst</h3>
+      <div class="st" id="st1"></div>
+    </div>
+
+    <div class="dz" id="dz2" style="margin-top:12px">
+      <div class="ic">&#128279;</div>
+      <div><strong>Optioneel:</strong> Sleep de <strong>bestanden-export</strong> (.xlsx met File VIDs)</div>
+      <div style="font-size:11px;color:#999;margin-top:4px">Nodig voor directe links naar TC Web</div>
+      <label for="f2">Klik om te selecteren</label>
+      <input type="file" id="f2" accept=".xlsx,.xls">
+    </div>
+
+    <div class="up-group" id="ug2" style="display:none">
+      <h3>Bestanden-export (links)</h3>
+      <div class="st" id="st2"></div>
+    </div>
+
+    <div class="up-group" id="ugPid" style="display:none">
+      <h3>Project-ID</h3>
+      <input type="text" id="pidInput" placeholder="bijv. 3pu4UlrPyqE">
+      <div class="hint">Uit je TC URL: web.connect.trimble.com/projects/<b>[dit]</b>/...</div>
+    </div>
+
+    <button class="go-btn" id="goBtn" disabled onclick="toonDashboard()">Bekijk dashboard</button>
+
+    <div class="disc"><b>Privacy:</b> Alles wordt lokaal in je browser verwerkt. Er worden geen gegevens verstuurd.</div>
+  </div>
+</div>
+
+<!-- PAGE: DASHBOARD -->
+<div class="page pg-dash" id="pgDash">
+  <div id="dashContent"></div>
+</div>
+
+<!-- PAGE: DOCUMENTEN -->
+<div class="page page-flex pg-docs" id="pgDocs">
+  <div class="sidebar">
+    <div class="sb-sec">
+      <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
+      <div class="frow">
+        <select id="fDisc"><option value="">Discipline</option></select>
+        <select id="fStat"><option value="">Status</option></select>
+      </div>
+      <div class="frow">
+        <select id="fFase"><option value="">Fase</option></select>
+        <select id="fBouw"><option value="">Bouwdeel</option></select>
+      </div>
+    </div>
+    <div class="sb-sec"><h3>Mappen</h3></div>
+    <div class="tree" id="treeList"></div>
+  </div>
+  <div class="main">
+    <div class="tbl-wrap">
+      <div class="tbl-scrl">
+        <table><thead id="tHead"></thead><tbody id="tBody"></tbody></table>
+        <div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div>
+      </div>
+      <div class="dpan" id="dPan">
+        <div class="dp-hd" id="dpHd"><h3></h3><div class="dp-path"></div></div>
+        <div id="dpCnt"></div>
+      </div>
+    </div>
+    <div class="ftr"><span id="ftr1"></span><span id="ftr2"></span></div>
+  </div>
+</div>
+
+<script>
+// === STATE ===
+let docs=[], mapS={}, vidMap={}, pid='', actMap=null, sortK='file_location', sortD='asc', selDoc=null, curPage='pgUpload';
+let tcAPI = null; // Trimble Connect Workspace API instance
+let isEmbedded = false; // Draait in TC iframe?
+const VERPLICHT = ['document_status','discipline','project_fase','document_datum'];
+const VERPLICHT_LABEL = {'document_status':'Document status','discipline':'Discipline','project_fase':'Project fase','document_datum':'Document datum'};
+const STATUS_KLEUR = {'Definitief':'var(--ok)','Voor uitvoering':'var(--info)','Concept':'#888','Vervallen':'var(--warn)'};
+
+const COLS = [
+  {k:'bestandsnaam',l:'Bestandsnaam',w:'22%'},
+  {k:'document_nummer',l:'Doc.nr',w:'9%'},
+  {k:'titel',l:'Omschrijving',w:'16%'},
+  {k:'bouwdeel',l:'Bouwdeel'},
+  {k:'discipline',l:'Discipline'},
+  {k:'project_fase',l:'Fase'},
+  {k:'revisie',l:'Rev.',w:'4%'},
+  {k:'document_datum',l:'Datum',w:'8%'},
+  {k:'document_status',l:'Status',w:'9%'},
+];
+
+const TCM = {'File location':'file_location','Bestandsnaam':'bestandsnaam','Document nummer':'document_nummer','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Document status':'document_status','Bedrijf':'bedrijf','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Contract status':'contract_status','Controlestatus (door controlerende partij)':'controlestatus','Controleverzoek':'controleverzoek','Discipline':'discipline','Document aanmaak datum':'document_aanmaak_datum','Document soort':'document_soort','IFC timestamp':'ifc_timestamp','Tags':'tags','Titel':'titel'};
+
+// === NAVIGATION ===
+const pages = ['pgUpload','pgDash','pgDocs'];
+function goTo(id) {
+  pages.forEach(p => document.getElementById(p).classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  curPage = id;
+  document.getElementById('backBtn').style.display = id === 'pgUpload' ? 'none' : 'block';
+  document.getElementById('csvBtn').style.display = id === 'pgDocs' ? 'block' : 'none';
+}
+function goBack() {
+  const i = pages.indexOf(curPage);
+  if (i > 0) goTo(pages[i - 1]);
+}
+
+// === UPLOAD ===
+function setupDZ(dzId, fId, handler) {
+  const dz = document.getElementById(dzId), fi = document.getElementById(fId);
+  dz.addEventListener('click', e => { if (e.target.tagName !== 'LABEL') fi.click(); });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files.length) handler(e.dataTransfer.files[0]); });
+  fi.addEventListener('change', () => { if (fi.files.length) handler(fi.files[0]); });
+}
+
+setupDZ('dz1','f1', file => {
+  const ug = document.getElementById('ug1'); ug.style.display = 'block';
+  const st = document.getElementById('st1');
+  st.textContent = 'Laden...'; st.className = 'st';
+
+  readXLSX(file, data => {
+    let hRow = -1;
+    for (let i = 0; i < Math.min(data.length, 20); i++) {
+      if (data[i] && String(data[i][0]).trim() === 'File location') { hRow = i; break; }
+    }
+    if (hRow === -1) { st.textContent = '"File location" niet gevonden'; return; }
+
+    const hdr = data[hRow], ki = {};
+    hdr.forEach((h, i) => { const k = TCM[String(h).trim()]; if (k) ki[k] = i; });
+
+    docs = [];
+    for (let i = hRow + 1; i < data.length; i++) {
+      const r = data[i]; if (!r || !r[ki.bestandsnaam]) continue;
+      const d = {};
+      for (const [k, c] of Object.entries(ki)) { const v = r[c]; d[k] = v != null ? String(v).trim() : ''; }
+      if (d.bestandsnaam) docs.push(d);
+    }
+    mapS = {};
+    docs.forEach(d => { const m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+
+    st.textContent = `${docs.length} documenten, ${Object.keys(mapS).length} mappen`;
+    st.className = 'st ok';
+    document.getElementById('ugPid').style.display = 'block';
+    document.getElementById('goBtn').disabled = false;
+    document.getElementById('hdrInfo').textContent = file.name;
+  });
+});
+
+setupDZ('dz2','f2', file => {
+  const ug = document.getElementById('ug2'); ug.style.display = 'block';
+  const st = document.getElementById('st2');
+  st.textContent = 'Laden...'; st.className = 'st';
+
+  readXLSX(file, data => {
+    // Zoek header met "File VID" en "File name"
+    let hRow = -1;
+    for (let i = 0; i < Math.min(data.length, 5); i++) {
+      const r = data[i];
+      if (r && r.some(c => String(c).trim() === 'File VID')) { hRow = i; break; }
+    }
+    if (hRow === -1) { st.textContent = '"File VID" niet gevonden'; return; }
+
+    const hdr = data[hRow];
+    let vidCol = -1, nameCol = -1, locCol = -1;
+    hdr.forEach((h, i) => {
+      const s = String(h).trim();
+      if (s === 'File VID') vidCol = i;
+      if (s === 'File name') nameCol = i;
+      if (s === 'File location') locCol = i;
+    });
+
+    vidMap = {};
+    let cnt = 0;
+    for (let i = hRow + 1; i < data.length; i++) {
+      const r = data[i]; if (!r) continue;
+      const vid = r[vidCol], name = r[nameCol], loc = r[locCol];
+      if (vid && name) {
+        // Gebruik locatie + naam als key voor betere matching
+        const key = name ? String(name).trim() : '';
+        vidMap[key] = String(vid).trim();
+        cnt++;
+      }
+    }
+    st.textContent = `${cnt} bestanden met VIDs geladen`;
+    st.className = 'st ok';
+
+    // Match VIDs met docs
+    let matched = 0;
+    docs.forEach(d => {
+      const vid = vidMap[d.bestandsnaam];
+      if (vid) { d._vid = vid; matched++; }
+    });
+    st.textContent += ` (${matched} gematcht)`;
+  });
+});
+
+function readXLSX(file, cb) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets['Documentenlijst'] || wb.Sheets['Files'] || wb.Sheets[wb.SheetNames[0]];
+      cb(XLSX.utils.sheet_to_json(ws, { header: 1 }));
+    } catch (err) { alert('Fout bij lezen: ' + err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// === DASHBOARD ===
+function toonDashboard() {
+  pid = document.getElementById('pidInput').value.trim();
+  goTo('pgDash');
+  renderDash();
+}
+
+function renderDash() {
+  const el = document.getElementById('dashContent');
+  const total = docs.length;
+
+  // Status counts
+  const stCnt = {}; docs.forEach(d => { const s = d.document_status || ''; if (s) stCnt[s] = (stCnt[s]||0)+1; });
+  const stWithStatus = Object.values(stCnt).reduce((a,b) => a+b, 0);
+
+  // Discipline counts
+  const diCnt = {}; docs.forEach(d => { const s = d.discipline || ''; if (s) diCnt[s] = (diCnt[s]||0)+1; });
+  const diSorted = Object.entries(diCnt).sort((a,b) => b[1]-a[1]);
+  const maxDi = diSorted.length ? diSorted[0][1] : 1;
+
+  // Donut
+  let offset = 0;
+  const donutParts = [];
+  Object.entries(stCnt).sort((a,b) => b[1]-a[1]).forEach(([n, c]) => {
+    const pct = c / (stWithStatus||1) * 100;
+    const klr = STATUS_KLEUR[n] || '#ccc';
+    donutParts.push(`${klr} ${offset}% ${offset+pct}%`);
+    offset += pct;
+  });
+  const donutCSS = donutParts.length ? `conic-gradient(${donutParts.join(',')})` : '#eee';
+
+  // Verplichte velden completeness
+  const veldHTML = VERPLICHT.map(veld => {
+    const filled = docs.filter(d => d[veld] && d[veld].trim()).length;
+    const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+    const klr = pct >= 80 ? 'var(--ok)' : pct >= 50 ? 'var(--af)' : 'var(--warn)';
+    const ringCSS = `conic-gradient(${klr} 0% ${pct}%, #f0ebe5 ${pct}% 100%)`;
+    return `<div class="veld-card">
+      <div class="veld-ring" style="background:${ringCSS}"><div class="veld-ring-c">${pct}%</div></div>
+      <div class="veld-info">
+        <div class="veld-naam">${VERPLICHT_LABEL[veld]}</div>
+        <div class="veld-detail">${filled} van ${total} ingevuld</div>
+        <div class="veld-bar"><div class="veld-fill" style="width:${pct}%;background:${klr}"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Linked files count
+  const linked = docs.filter(d => d._vid).length;
+
+  el.innerHTML = `
+    <div class="big-stats">
+      <div class="bstat"><div class="lab">Totaal documenten</div><div class="val">${total}</div></div>
+      <div class="bstat"><div class="lab">Mappen</div><div class="val">${Object.keys(mapS).length}</div></div>
+      <div class="bstat"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">${stCnt['Definitief']||0}</div></div>
+      <div class="bstat"><div class="lab">Met TC link</div><div class="val" style="color:var(--info)">${linked}</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="dcard">
+        <h3>Status verdeling</h3>
+        <div class="donut-wrap">
+          <div class="donut" style="background:${donutCSS}"><div class="donut-c">${stWithStatus}</div></div>
+          <div class="donut-leg">
+            ${Object.entries(stCnt).sort((a,b)=>b[1]-a[1]).map(([n,c]) => `<div><span class="dot" style="background:${STATUS_KLEUR[n]||'#ccc'}"></span>${n}: <b>${c}</b></div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="dcard">
+        <h3>Verplichte velden (Van der Poel)</h3>
+        ${veldHTML}
+      </div>
+
+      <div class="dcard">
+        <h3>Discipline</h3>
+        ${diSorted.map(([n,c]) => `<div class="bar-r"><span class="bar-l" title="${n}">${n}</span><div class="bar-t"><div class="bar-f" style="width:${c/maxDi*100}%;background:var(--af)"></div></div><span class="bar-c">${c}</span></div>`).join('')}
+      </div>
+
+      <div class="dcard">
+        <h3>Fase verdeling</h3>
+        ${(() => {
+          const fCnt = {}; docs.forEach(d => { const s = d.project_fase || ''; if (s) fCnt[s] = (fCnt[s]||0)+1; });
+          const fSorted = Object.entries(fCnt).sort((a,b) => b[1]-a[1]);
+          const maxF = fSorted.length ? fSorted[0][1] : 1;
+          return fSorted.map(([n,c]) => `<div class="bar-r"><span class="bar-l" title="${n}">${n}</span><div class="bar-t"><div class="bar-f" style="width:${c/maxF*100}%;background:var(--info)"></div></div><span class="bar-c">${c}</span></div>`).join('');
+        })()}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <button class="nav-btn" onclick="toonDocs()">Bekijk documentenlijst &#8594;</button>
+      <button class="nav-btn sec" onclick="exportCSV()">&#11015; Exporteer als CSV</button>
+    </div>
+  `;
+}
+
+// === DOCUMENTEN PAGINA ===
+function toonDocs() {
+  goTo('pgDocs');
+  if (!document.getElementById('tHead').children.length) {
+    vulFilters(); bouwBoom(); bouwTH(); renderT();
+    document.getElementById('searchBox').addEventListener('input', renderT);
+    ['fDisc','fStat','fFase','fBouw'].forEach(id => document.getElementById(id).addEventListener('change', renderT));
+  }
+}
+
+function vulFilters() {
+  const s = {discipline:new Set(),document_status:new Set(),project_fase:new Set(),bouwdeel:new Set()};
+  docs.forEach(d => Object.keys(s).forEach(k => { if (d[k]) s[k].add(d[k]); }));
+  const fill = (id, set) => { const sel = document.getElementById(id); [...set].sort().forEach(w => { const o = document.createElement('option'); o.value=w; o.textContent=w; sel.appendChild(o); }); };
+  fill('fDisc',s.discipline); fill('fStat',s.document_status); fill('fFase',s.project_fase); fill('fBouw',s.bouwdeel);
+}
+
+// === BOOM ===
+function bouwBoom() {
+  const tree = document.getElementById('treeList');
+  tree.innerHTML = '';
+
+  const alle = mkTR('Alle documenten', docs.length, -1, false, '');
+  alle.querySelector('.tr-row').classList.add('act');
+  alle.querySelector('.tr-nm').onclick = () => { actMap=null; document.querySelectorAll('.tr-row').forEach(r=>r.classList.remove('act')); alle.querySelector('.tr-row').classList.add('act'); renderT(); };
+  tree.appendChild(alle);
+
+  const boom = {};
+  Object.keys(mapS).sort().forEach(mp => {
+    const dl = mp.split('/').filter(d => d);
+    let node = boom, pad = '';
+    dl.forEach((deel, i) => {
+      pad += (i>0?'/':'') + deel;
+      if (!node[deel]) node[deel] = {_ch:{},_cnt:0,_pad:pad,_d:i};
+      node[deel]._cnt += mapS[mp].length;
+      node = node[deel]._ch;
+    });
+  });
+
+  (function rn(node, parent) {
+    Object.keys(node).sort().forEach(naam => {
+      if (naam[0]==='_') return;
+      const inf = node[naam];
+      const hasCh = Object.keys(inf._ch).filter(k=>k[0]!=='_').length > 0;
+      const el = mkTR(naam, inf._cnt, inf._d, hasCh, inf._pad);
+      el.querySelector('.tr-nm').onclick = () => {
+        actMap = Object.keys(mapS).filter(m => m===inf._pad || m.startsWith(inf._pad+'/'));
+        document.querySelectorAll('.tr-row').forEach(r=>r.classList.remove('act'));
+        el.querySelector('.tr-row').classList.add('act');
+        renderT();
+      };
+      parent.appendChild(el);
+      if (hasCh) { const ch = document.createElement('div'); ch.className = 'tr-ch' + (inf._d > 0 ? ' hide' : ''); rn(inf._ch, ch); parent.appendChild(ch); }
+    });
+  })(boom, tree);
+}
+
+function mkTR(naam, cnt, depth, hasCh, pad) {
+  const w = document.createElement('div');
+  const row = document.createElement('div');
+  row.className = 'tr-row';
+  let tog = hasCh ? `<span class="tr-tog${depth<=0?' open':''}" onclick="event.stopPropagation();togN(this)">&#9654;</span>` : '<span class="tr-tog"></span>';
+  let lnk = '';
+  if (pid && pad) lnk = `<a class="tr-lnk" href="https://web.connect.trimble.com/projects/${pid}/data" target="_blank" title="Open map in TC" onclick="event.stopPropagation()">&#8599;</a>`;
+  row.innerHTML = `${tog}<span class="tr-ico">${depth<=0?'&#128193;':'&#128194;'}</span><span class="tr-nm">${naam}</span>${lnk}<span class="tr-cnt">${cnt}</span>`;
+  w.appendChild(row);
+  return w;
+}
+function togN(el) { el.classList.toggle('open'); const ch = el.closest('.tr-row').parentElement.nextElementSibling; if (ch && ch.classList.contains('tr-ch')) ch.classList.toggle('hide'); }
+
+// === TABEL ===
+function bouwTH() {
+  const h = document.getElementById('tHead'), tr = document.createElement('tr');
+  COLS.forEach(c => {
+    const th = document.createElement('th');
+    th.innerHTML = `${c.l} <span class="sa">&#9650;</span>`;
+    if (c.w) th.style.width = c.w;
+    th.onclick = () => {
+      if (sortK===c.k) sortD = sortD==='asc'?'desc':'asc'; else { sortK=c.k; sortD='asc'; }
+      h.querySelectorAll('th').forEach(t=>t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      th.querySelector('.sa').innerHTML = sortD==='asc'?'&#9650;':'&#9660;';
+      renderT();
+    };
+    tr.appendChild(th);
+  });
+  h.appendChild(tr);
+}
+
+function filt() {
+  const z = document.getElementById('searchBox').value.toLowerCase();
+  const fD=document.getElementById('fDisc').value, fS=document.getElementById('fStat').value, fF=document.getElementById('fFase').value, fB=document.getElementById('fBouw').value;
+  let d = docs.filter(d => {
+    if (actMap && !actMap.includes(d.file_location)) return false;
+    if (fD && d.discipline!==fD) return false;
+    if (fS && d.document_status!==fS) return false;
+    if (fF && d.project_fase!==fF) return false;
+    if (fB && d.bouwdeel!==fB) return false;
+    if (z) { const t = [d.bestandsnaam,d.document_nummer,d.titel,d.discipline,d.file_location,d.bouwdeel].join(' ').toLowerCase(); if (!t.includes(z)) return false; }
+    return true;
+  });
+  if (sortK) d.sort((a,b) => { const va=(a[sortK]||'').toLowerCase(), vb=(b[sortK]||'').toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
+  return d;
+}
+
+function renderT() {
+  const body=document.getElementById('tBody'), nr=document.getElementById('noR'), filtered=filt();
+  body.innerHTML='';
+  if (!filtered.length) { nr.style.display='block'; document.getElementById('ftr1').textContent='0 documenten'; return; }
+  nr.style.display='none';
+
+  const pm = {};
+  filtered.forEach(d => { const m=d.file_location||'(root)'; if (!pm[m]) pm[m]=[]; pm[m].push(d); });
+
+  Object.keys(pm).sort().forEach(mp => {
+    const dl = mp.split('/').filter(d=>d);
+    const niv = Math.min(dl.length, 3);
+    const mtr = document.createElement('tr');
+    mtr.className = 'mn'+niv;
+    const td = document.createElement('td');
+    td.colSpan = COLS.length;
+    td.innerHTML = `${niv===1?'&#128193;':'&#128194;'} ${mp}`;
+    mtr.appendChild(td);
+    body.appendChild(mtr);
+
+    pm[mp].forEach(doc => {
+      const tr = document.createElement('tr');
+      tr.onclick = () => toonDetail(doc);
+      if (selDoc===doc) tr.classList.add('sel');
+      COLS.forEach(c => {
+        const td = document.createElement('td');
+        const v = doc[c.k] || '';
+        if (c.k==='bestandsnaam' && pid && doc._vid) {
+          const a = document.createElement('a');
+          a.href = `https://web.connect.trimble.com/projects/${pid}/viewer/2D?id=${doc._vid}&version=`;
+          a.target='_blank'; a.textContent=v; a.title='Open in TC Web (laatste versie)';
+          a.onclick = e => e.stopPropagation();
+          td.appendChild(a);
+        } else if (c.k==='document_status' && v) {
+          td.innerHTML = sBdg(v);
+        } else { td.textContent = v; }
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  });
+  document.getElementById('ftr1').textContent = `${filtered.length} van ${docs.length} documenten`;
+  document.getElementById('ftr2').textContent = `${Object.keys(pm).length} mappen`;
+}
+
+function sBdg(s) {
+  const sl=s.toLowerCase(); let c='b-ov';
+  if (sl==='definitief') c='b-def'; else if (sl.includes('uitvoering')) c='b-uit'; else if (sl==='concept') c='b-con'; else if (sl==='vervallen') c='b-ver';
+  return `<span class="bdg ${c}">${s}</span>`;
+}
+
+// === DETAIL ===
+function toonDetail(doc) {
+  selDoc = doc;
+  const pan = document.getElementById('dPan');
+  pan.classList.add('vis');
+  document.querySelector('#dpHd h3').textContent = doc.bestandsnaam;
+  document.querySelector('#dpHd .dp-path').textContent = doc.file_location;
+
+  const velden = [['Document nummer',doc.document_nummer],['Titel',doc.titel],['Bouwdeel',doc.bouwdeel],['Bouwnummer',doc.bouwnummer],['Discipline',doc.discipline],['Fase',doc.project_fase],['Status',doc.document_status],['Revisie',doc.revisie],['Document datum',doc.document_datum],['Aanmaak datum',doc.document_aanmaak_datum],['Bedrijf',doc.bedrijf],['Document soort',doc.document_soort],['Contract status',doc.contract_status],['Controlestatus',doc.controlestatus],['Tags',doc.tags]];
+
+  let html = '<div class="dp-sec"><h4>Metadata</h4>';
+  velden.forEach(([l,v]) => { if (v) { let d=v; if (l==='Status') d=sBdg(v); html += `<div class="dp-row"><span class="dl">${l}</span><span class="dv">${d}</span></div>`; } });
+  html += '</div>';
+
+  if (pid && doc._vid) {
+    html += `<a class="dp-tc" href="https://web.connect.trimble.com/projects/${pid}/viewer/2D?id=${doc._vid}&version=" target="_blank">Open in Trimble Connect &#8599;</a>`;
+  } else if (pid) {
+    html += `<a class="dp-tc" href="https://web.connect.trimble.com/projects/${pid}/data" target="_blank" style="opacity:.6">Open project in TC &#8599;</a>`;
+  }
+  document.getElementById('dpCnt').innerHTML = html;
+  renderT();
+}
+
+// === CSV ===
+function exportCSV() {
+  const d = filt();
+  const h = COLS.map(c=>c.l).concat(['Map']);
+  const rows = d.map(doc => COLS.map(c=>`"${(doc[c.k]||'').replace(/"/g,'""')}"`).concat([`"${doc.file_location||''}"`]));
+  const csv = [h.join(';'), ...rows.map(r=>r.join(';'))].join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='documentenlijst_export.csv'; a.click();
+}
+
+// === TRIMBLE CONNECT API ===
+const TC_BASE = 'https://app.connect.trimble.com/tc/api/2.0';
+const PSET_BASE = 'https://pset-api.connect.trimble.com/v1';
+let tcToken = '';
+
+async function tcGet(url, params) {
+  const u = new URL(url);
+  if (params) Object.entries(params).forEach(([k,v]) => u.searchParams.set(k, v));
+  const r = await fetch(u, { headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' } });
+  if (r.status === 401) { console.error('[TC] Token verlopen'); return null; }
+  if (!r.ok) { console.warn(`[TC] ${r.status} voor ${url}`); return null; }
+  return r.json();
+}
+
+// Haal root folder ID op
+async function tcGetRootId(projectId) {
+  const p = await tcGet(`${TC_BASE}/projects/${projectId}`);
+  return p ? p.rootId : null;
+}
+
+// Haal mappen + bestanden recursief op
+async function tcGetItems(folderId, pad, resultaat) {
+  const data = await tcGet(`${TC_BASE}/folders/${folderId}/items`);
+  if (!data) return;
+  const items = Array.isArray(data) ? data : (data.items || []);
+  for (const item of items) {
+    const naam = item.name || 'Naamloos';
+    const volledigPad = pad ? pad + '/' + naam : naam;
+    if (item.type === 'FOLDER') {
+      if (item.hasChildren !== false) {
+        await tcGetItems(item.id, volledigPad, resultaat);
+      }
+    } else {
+      resultaat.push({
+        file_location: pad,
+        bestandsnaam: naam,
+        _vid: item.id || '',
+        _size: item.size || '',
+        _modified: item.modifiedOn || item.lastModifiedOn || '',
+        _createdBy: item.createdBy || '',
+      });
+    }
+  }
+}
+
+// Haal property set definities + waarden op voor het project
+async function tcGetMetadata(projectId, bestanden) {
+  // Stap 1: Haal beschikbare property set definities op
+  let defs;
+  try {
+    defs = await tcGet(`${PSET_BASE}/projects/${projectId}/defs`);
+  } catch(e) {
+    console.warn('[TC] PSet API niet beschikbaar:', e.message);
+    return;
+  }
+  if (!defs || !Array.isArray(defs)) {
+    console.log('[TC] Geen property set definities gevonden');
+    return;
+  }
+  console.log(`[TC] ${defs.length} property set definities gevonden`);
+
+  // Maak een lookup van bestandsnaam → bestand-object
+  const lookup = {};
+  bestanden.forEach(b => { lookup[b._vid] = b; });
+
+  // Stap 2: Per definitie, haal de instanties op
+  for (const def of defs) {
+    const defId = def.id || def.defId;
+    if (!defId) continue;
+    console.log(`[TC] PSet: ${def.name || defId}`);
+
+    let instances;
+    try {
+      instances = await tcGet(`${PSET_BASE}/projects/${projectId}/defs/${defId}/instances`);
+    } catch(e) { continue; }
+    if (!instances || !Array.isArray(instances)) continue;
+
+    // Stap 3: Map property waarden naar bestanden
+    for (const inst of instances) {
+      const linkId = inst.linkId || inst.objectId || '';
+      const bestand = lookup[linkId];
+      if (!bestand) continue;
+
+      const props = inst.properties || inst.props || {};
+      // Map bekende velden
+      const mapping = {
+        'Document nummer': 'document_nummer',
+        'Document status': 'document_status',
+        'Project fase': 'project_fase',
+        'Document datum': 'document_datum',
+        'Revisie': 'revisie',
+        'Discipline': 'discipline',
+        'Bouwdeel': 'bouwdeel',
+        'Bouwnummer': 'bouwnummer',
+        'Bedrijf': 'bedrijf',
+        'Titel': 'titel',
+        'Document soort': 'document_soort',
+        'Contract status': 'contract_status',
+        'Controlestatus': 'controlestatus',
+        'Controleverzoek': 'controleverzoek',
+        'Tags': 'tags',
+      };
+      for (const [psetNaam, docKey] of Object.entries(mapping)) {
+        // Zoek case-insensitive in properties
+        for (const [propNaam, propVal] of Object.entries(props)) {
+          if (propNaam.toLowerCase().includes(psetNaam.toLowerCase()) || psetNaam.toLowerCase().includes(propNaam.toLowerCase())) {
+            const val = typeof propVal === 'object' ? (propVal.value || propVal.displayValue || '') : propVal;
+            if (val && !bestand[docKey]) bestand[docKey] = String(val).trim();
+          }
+        }
+      }
+    }
+  }
+}
+
+// Hoofdfunctie: laad alles vanuit TC
+async function laadVanuitTC() {
+  const statusEl = document.getElementById('tcLoadStatus');
+  const log = (msg) => { console.log('[TC] ' + msg); if (statusEl) statusEl.textContent = msg; };
+
+  log('Mappen en bestanden ophalen...');
+  const rootId = await tcGetRootId(pid);
+  if (!rootId) { log('Kan root folder niet vinden'); return false; }
+
+  const resultaat = [];
+  await tcGetItems(rootId, '', resultaat);
+  log(`${resultaat.length} bestanden gevonden. Metadata ophalen...`);
+
+  // Metadata ophalen (Property Set API)
+  await tcGetMetadata(pid, resultaat);
+
+  // Zet resultaat om naar docs formaat
+  docs = resultaat.map(b => ({
+    file_location: b.file_location || '',
+    bestandsnaam: b.bestandsnaam || '',
+    document_nummer: b.document_nummer || '',
+    project_fase: b.project_fase || '',
+    document_datum: b.document_datum || b._modified || '',
+    revisie: b.revisie || '',
+    document_status: b.document_status || '',
+    bedrijf: b.bedrijf || '',
+    bouwdeel: b.bouwdeel || '',
+    bouwnummer: b.bouwnummer || '',
+    discipline: b.discipline || '',
+    document_soort: b.document_soort || '',
+    titel: b.titel || '',
+    tags: b.tags || '',
+    contract_status: b.contract_status || '',
+    controlestatus: b.controlestatus || '',
+    controleverzoek: b.controleverzoek || '',
+    _vid: b._vid || '',
+  }));
+
+  // Bouw mapstructuur
+  mapS = {};
+  docs.forEach(d => { const m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+
+  log(`Klaar: ${docs.length} documenten in ${Object.keys(mapS).length} mappen`);
+  return true;
+}
+
+// === TRIMBLE CONNECT EXTENSIE ===
+async function initTC() {
+  try {
+    isEmbedded = typeof TrimbleConnectWorkspace !== 'undefined'
+      && TrimbleConnectWorkspace.isApplicationEmbedded();
+  } catch(e) {
+    isEmbedded = false;
+  }
+
+  if (!isEmbedded) {
+    console.log('[Viewer] Standalone modus');
+    return;
+  }
+
+  console.log('[Viewer] TC extensie modus — verbinden...');
+  try {
+    tcAPI = await TrimbleConnectWorkspace.connect(window.parent, (event, data) => {
+      console.log('[Viewer] TC event:', event, data);
+      if (event === 'extension.accessToken' && data) {
+        tcToken = data.accessToken || data.token || data;
+        console.log('[Viewer] Access token ontvangen');
+      }
+      if (event === 'extension.command') {
+        if (data === 'show_dashboard') goTo('pgDash');
+        else if (data === 'show_docs') toonDocs();
+      }
+    }, 15000);
+
+    console.log('[Viewer] Verbonden met TC Workspace API');
+
+    // Haal project-info op
+    if (tcAPI.project && tcAPI.project.getProject) {
+      const project = await tcAPI.project.getProject();
+      if (project) {
+        pid = project.id || '';
+        document.getElementById('hdrInfo').textContent = project.name || '';
+        console.log(`[Viewer] Project: ${project.name} (${pid})`);
+      }
+    }
+
+    // Vraag access token aan
+    if (tcAPI.extension && tcAPI.extension.requestPermission) {
+      const tokenResult = await tcAPI.extension.requestPermission('accesstoken');
+      if (tokenResult && tokenResult !== 'pending' && tokenResult !== 'denied') {
+        tcToken = tokenResult.accessToken || tokenResult.token || tokenResult;
+      }
+      console.log('[Viewer] Token status:', tcToken ? 'ontvangen' : 'wachten op event');
+    }
+
+    // Toon menu
+    if (tcAPI.ui && tcAPI.ui.setMenu) {
+      tcAPI.ui.setMenu({
+        title: "Documentenlijst",
+        icon: "",
+        command: "show_doclist",
+        subMenus: [
+          { title: "Dashboard", command: "show_dashboard" },
+          { title: "Documenten", command: "show_docs" }
+        ]
+      });
+    }
+
+    // Als we token + project-ID hebben, laad data direct
+    if (tcToken && pid) {
+      // Verberg upload, toon laad-indicator
+      document.getElementById('pgUpload').innerHTML = `
+        <div class="ucard" style="text-align:center">
+          <h2>Documentenlijst laden...</h2>
+          <div class="tag">Verbonden met Trimble Connect</div>
+          <p id="tcLoadStatus">Mappen en bestanden ophalen...</p>
+          <div style="margin:20px"><div class="bar-t" style="height:6px"><div class="bar-f" style="width:100%;background:var(--af);animation:pulse 1.5s infinite"></div></div></div>
+          <style>@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}</style>
+        </div>
+      `;
+      const ok = await laadVanuitTC();
+      if (ok) toonDashboard();
+    }
+
+  } catch(e) {
+    console.warn('[Viewer] TC connectie mislukt:', e.message);
+    isEmbedded = false;
+  }
+}
+
+// Start
+initTC();
+</script>
+</body>
+</html>
