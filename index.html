@@ -937,6 +937,15 @@ async function initTC() {
       });
     }
 
+    // Wacht op token als het nog niet binnen is (max 10 sec)
+    if (!tcToken && pid) {
+      console.log('[Viewer] Wachten op access token...');
+      for (let i = 0; i < 20 && !tcToken; i++) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!tcToken) console.warn('[Viewer] Geen token ontvangen na 10 sec');
+    }
+
     // Als we token + project-ID hebben, laad data direct
     if (tcToken && pid) {
       // Verberg upload, toon laad-indicator
