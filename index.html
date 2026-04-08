@@ -120,12 +120,14 @@ thead th.sorted .sa{opacity:1;color:var(--af)}
 tbody tr{border-bottom:1px solid #f0f0f0;transition:background .1s;cursor:pointer}
 tbody tr:hover{background:var(--afl)}
 tbody tr.sel{background:#fff3e0}
-tbody tr.mn1{background:#FFF0D0}
-tbody tr.mn1 td{font-weight:700;font-size:12px;border-bottom:2px solid #e0c080;color:#8B6914;padding:6px 8px}
-tbody tr.mn2{background:#FFFDE7}
-tbody tr.mn2 td{font-weight:600;font-size:11px;border-bottom:1px solid #e0d5a0;color:#7B6C00}
-tbody tr.mn3{background:#FAFAF0}
-tbody tr.mn3 td{font-weight:500;font-size:11px;color:#999}
+tbody tr.mn1{background:#FFC000}
+tbody tr.mn1 td{font-weight:700;font-size:13px;border-bottom:2px solid #d4a000;color:#553600;padding:8px 10px}
+tbody tr.mn2{background:#FFFF00}
+tbody tr.mn2 td{font-weight:600;font-size:12px;border-bottom:1px solid #d4d400;color:#555500}
+tbody tr.mn3{background:#FFF8E1}
+tbody tr.mn3 td{font-weight:500;font-size:11px;color:#8B7500;border-bottom:1px solid #f0e8c0}
+tbody tr.mn-meta{background:#f0ebe5}
+tbody tr.mn-meta td{font-weight:700;font-size:12px;border-bottom:2px solid #d4c8b0;color:#555;padding:8px 10px}
 td{padding:6px 8px;vertical-align:top}
 td a{color:var(--af);text-decoration:none}
 td a:hover{text-decoration:underline}
@@ -237,16 +239,16 @@ const VERPLICHT_LABEL = {'document_status':'Document status','discipline':'Disci
 const STATUS_KLEUR = {'Definitief':'var(--ok)','Voor uitvoering':'var(--info)','Concept':'#888','Vervallen':'var(--warn)'};
 
 const COLS = [
-  {k:'bestandsnaam',l:'Bestandsnaam',w:'22%'},
-  {k:'document_nummer',l:'Doc.nr',w:'9%'},
-  {k:'titel',l:'Omschrijving',w:'16%'},
-  {k:'bouwdeel',l:'Bouwdeel'},
-  {k:'discipline',l:'Discipline'},
-  {k:'project_fase',l:'Fase'},
+  {k:'bestandsnaam',l:'Bestandsnaam',w:'20%'},
+  {k:'document_nummer',l:'Doc.nr',w:'8%'},
+  {k:'bouwdeel',l:'Bouwdeel',w:'7%'},
+  {k:'titel',l:'Omschrijving',w:'15%'},
+  {k:'discipline',l:'Discipline',w:'9%'},
+  {k:'project_fase',l:'Fase',w:'10%'},
   {k:'revisie',l:'Rev.',w:'4%'},
-  {k:'document_datum',l:'Datum',w:'8%'},
-  {k:'document_status',l:'Status',w:'9%'},
-  {k:'_created',l:'Toegevoegd',w:'8%'},
+  {k:'document_datum',l:'Datum',w:'7%'},
+  {k:'document_status',l:'Status',w:'8%'},
+  {k:'_created',l:'Toegevoegd',w:'7%'},
 ];
 
 const TCM = {'File location':'file_location','Bestandsnaam':'bestandsnaam','Document nummer':'document_nummer','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Document status':'document_status','Bedrijf':'bedrijf','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Contract status':'contract_status','Controlestatus (door controlerende partij)':'controlestatus','Controleverzoek':'controleverzoek','Discipline':'discipline','Document aanmaak datum':'document_aanmaak_datum','Document soort':'document_soort','IFC timestamp':'ifc_timestamp','Tags':'tags','Titel':'titel'};
@@ -726,24 +728,39 @@ function renderT() {
     pm[''] = filtered;
   }
 
+  var grpIdx = 0;
   Object.keys(pm).sort().forEach(function(mp) {
+    var gid = 'grp' + grpIdx++;
     // Groepsheader
     if (groepVeld && mp) {
       var mtr = document.createElement('tr');
+      mtr.style.cursor = 'pointer';
+      mtr.onclick = function() {
+        var rows = document.querySelectorAll('.'+gid);
+        var hidden = rows.length && rows[0].style.display === 'none';
+        rows.forEach(function(r) { r.style.display = hidden ? '' : 'none'; });
+        var arrow = mtr.querySelector('.grp-arrow');
+        if (arrow) arrow.textContent = hidden ? '\u25BC' : '\u25B6';
+      };
       if (groepVeld === 'file_location') {
         var dl = mp.split('/').filter(function(d){return d;}), niv = Math.min(dl.length, 3);
         mtr.className = 'mn' + niv;
         var td = document.createElement('td'); td.colSpan = COLS.length;
-        td.innerHTML = (niv===1?'&#128193;':'&#128194;') + ' ' + mp;
+        td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + (niv===1?'&#128193;':'&#128194;') + ' ' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
       } else {
-        mtr.className = 'mn1';
+        mtr.className = 'mn-meta';
         var td = document.createElement('td'); td.colSpan = COLS.length;
-        td.innerHTML = mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
+        if (groepVeld === 'document_status') {
+          td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + sBdg(mp) + ' <span style="opacity:.5;font-weight:400;margin-left:8px">' + pm[mp].length + ' documenten</span>';
+        } else {
+          td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
+        }
       }
       mtr.appendChild(td); body.appendChild(mtr);
     }
     pm[mp].forEach(function(doc) {
       var tr = document.createElement('tr');
+      tr.className = gid;
       tr.onclick = function() { toonDetail(doc); };
       if (selDoc===doc) tr.classList.add('sel');
       COLS.forEach(function(c) {
