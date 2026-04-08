@@ -463,21 +463,39 @@ async function tcAutoFetchData() {
   }
 }
 
+var _fetchedFolders = 0, _totalFolders = 0;
+
 async function tcGetItemsRecursive(folderId, pad, result) {
   var data;
-  try { data = await tcFetch('/folders/' + folderId + '/items'); } catch(e) { return; }
+  try { data = await tcFetch('/folders/' + folderId + '/items'); } catch(e) { _fetchedFolders++; return; }
   var items = Array.isArray(data) ? data : (data.items || []);
+  var subFolders = [];
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
     var naam = item.name || 'Naamloos';
     var volledigPad = pad ? pad + '/' + naam : naam;
     if (item.type === 'FOLDER') {
-      await tcGetItemsRecursive(item.id, volledigPad, result);
+      subFolders.push({ id: item.id, pad: volledigPad });
     } else {
       result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '' });
     }
   }
-  tcShowProgress(Math.min(95, result.length));
+  _fetchedFolders++;
+  _totalFolders += subFolders.length;
+
+  // Voortgang tonen
+  var pct = _totalFolders > 0 ? Math.min(95, Math.round(_fetchedFolders / (_totalFolders + 1) * 100)) : 0;
+  tcShowProgress(pct);
+  document.getElementById('tcStatusText').textContent = 'Mappen: ' + _fetchedFolders + ' | Bestanden: ' + result.length;
+
+  // Parallelle requests (max 10 tegelijk) voor snelheid
+  var BATCH = 10;
+  for (var b = 0; b < subFolders.length; b += BATCH) {
+    var batch = subFolders.slice(b, b + BATCH);
+    await Promise.all(batch.map(function(sf) {
+      return tcGetItemsRecursive(sf.id, sf.pad, result);
+    }));
+  }
 }
 
 async function tcGetMetadata(projectId, bestanden) {
