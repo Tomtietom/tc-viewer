@@ -791,7 +791,7 @@ function fmtDate(s) {
 var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
 function tcFileUrl(vid, naam) {
   var ext = (naam || '').split('.').pop().toLowerCase();
-  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/3D?id='+vid;
+  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/detailviewer?fileId='+vid+'&versionId='+vid;
   return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+vid+'&version=';
 }
 
