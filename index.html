@@ -421,7 +421,7 @@ async function tcAutoFetchData() {
 
     tcStep(3, 'loading', 'Bestanden ophalen...');
     var allFiles = [];
-    await tcGetItemsRecursive(rootId, '', allFiles);
+    try { await tcGetItemsRecursive(rootId, '', allFiles); } catch(e) { console.warn('[TC] Sommige mappen overgeslagen:', e.message); }
     tcStep(3, 'done', allFiles.length + ' bestanden gevonden');
 
     // === METADATA OPHALEN ===
@@ -432,35 +432,44 @@ async function tcAutoFetchData() {
       tcStep(4, 'done', 'Metadata: ' + metaCount + ' bestanden');
     } catch(e) {
       console.warn('[TC] Metadata mislukt:', e.message);
-      tcStep(4, 'error', 'Metadata niet beschikbaar (CORS)');
+      tcStep(4, 'error', 'Metadata niet beschikbaar');
     }
 
-    // === DOCS VULLEN ===
-    docs = allFiles.map(function(b) {
-      return {
-        file_location: b.file_location||'', bestandsnaam: b.bestandsnaam||'',
-        document_nummer: b.document_nummer||'', project_fase: b.project_fase||'',
-        document_datum: b.document_datum||'', revisie: b.revisie||'',
-        document_status: b.document_status||'', bedrijf: b.bedrijf||'',
-        bouwdeel: b.bouwdeel||'', bouwnummer: b.bouwnummer||'',
-        discipline: b.discipline||'', document_soort: b.document_soort||'',
-        titel: b.titel||'', tags: b.tags||'',
-        contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
-        controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
-      };
-    });
-    mapS = {};
-    docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+    // === DOCS VULLEN + DASHBOARD TONEN ===
+    function vulDocs(files) {
+      docs = files.map(function(b) {
+        return {
+          file_location: b.file_location||'', bestandsnaam: b.bestandsnaam||'',
+          document_nummer: b.document_nummer||'', project_fase: b.project_fase||'',
+          document_datum: b.document_datum||'', revisie: b.revisie||'',
+          document_status: b.document_status||'', bedrijf: b.bedrijf||'',
+          bouwdeel: b.bouwdeel||'', bouwnummer: b.bouwnummer||'',
+          discipline: b.discipline||'', document_soort: b.document_soort||'',
+          titel: b.titel||'', tags: b.tags||'',
+          contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
+          controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
+        };
+      });
+      mapS = {};
+      docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+    }
+    vulDocs(allFiles);
 
-    // Toon dashboard
+    // Direct naar dashboard
     goTo('pgDash');
     renderDash();
 
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
-    tcStep(1, 'error', 'Fout: ' + e.message);
-    document.getElementById('tcError').style.display = '';
-    document.getElementById('tcError').textContent = e.message;
+    // Toon dashboard met wat we hebben, ook bij fouten
+    if (docs.length > 0) {
+      goTo('pgDash');
+      renderDash();
+    } else {
+      tcStep(1, 'error', 'Fout: ' + e.message);
+      document.getElementById('tcError').style.display = '';
+      document.getElementById('tcError').textContent = e.message;
+    }
   }
 }
 
@@ -489,15 +498,16 @@ async function tcGetItemsRecursive(folderId, pad, result) {
   tcShowProgress(pct);
   document.getElementById('tcStatusText').textContent = 'Mappen: ' + _fetchedFolders + ' | Bestanden: ' + result.length;
 
-  // Parallelle requests (max 5 tegelijk, met foutafhandeling per request)
-  var BATCH = 5;
+  // Parallelle requests (max 3 tegelijk, met delay en foutafhandeling)
+  var BATCH = 3;
   for (var b = 0; b < subFolders.length; b += BATCH) {
     var batch = subFolders.slice(b, b + BATCH);
     await Promise.all(batch.map(function(sf) {
       return tcGetItemsRecursive(sf.id, sf.pad, result).catch(function(e) {
-        console.warn('[TC] Map overgeslagen:', sf.pad, e.message);
+        console.warn('[TC] Map overgeslagen:', sf.pad);
       });
     }));
+    if (b + BATCH < subFolders.length) await new Promise(function(r) { setTimeout(r, 100); });
   }
 }
 
