@@ -523,10 +523,15 @@ async function tcGetMetadata(projectId, bestanden) {
   // Stap 2: Haal de instanties (property waarden per bestand)
   var instances;
   try {
-    instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/instances');
+    instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/instances');
   } catch(e) {
-    console.warn('[TC] PSet instances ophalen mislukt:', e.message);
-    return;
+    console.warn('[TC] PSet instances pad 1 mislukt:', e.message);
+    try {
+      instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/instances');
+    } catch(e2) {
+      console.warn('[TC] PSet instances pad 2 ook mislukt:', e2.message);
+      return;
+    }
   }
 
   if (!instances) { console.log('[TC] Geen PSet instances'); return; }
