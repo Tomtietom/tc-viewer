@@ -500,67 +500,64 @@ async function tcGetItemsRecursive(folderId, pad, result) {
 }
 
 async function tcGetMetadata(projectId, bestanden) {
-  // PSet API pad: /libs/tcproject:prod:{projectId}/defs/tcfiles
   var libId = 'tcproject:prod:' + projectId;
   console.log('[TC] PSet lib:', libId);
 
-  // Stap 1: Haal de property set definitie op
-  var defsResp;
-  try {
-    defsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
-  } catch(e) {
-    console.warn('[TC] PSet defs ophalen mislukt:', e.message);
-    // Probeer alternatief pad
-    try {
-      defsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs');
-    } catch(e2) {
-      console.warn('[TC] PSet defs alternatief ook mislukt:', e2.message);
-      return;
-    }
-  }
-  console.log('[TC] PSet defs response:', JSON.stringify(defsResp).substring(0, 200));
+  // Property ID → veldnaam mapping (VW BVGO schema)
+  var PROP_MAP = {
+    '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
+    '3d82d630-c1a6-11ed-a3ee-5d6c31021d9f': 'document_aanmaak_datum',
+    'a442e490-d47a-11ee-8133-af31c2576a74': 'revisie',
+    'cbc46730-41af-11ea-9125-af458cfb61c4': 'document_status',
+    'c83d7d90-055a-11ea-9ee0-4f66993176e1': 'project_fase',
+    '202e0b40-055c-11ea-9ee0-4f66993176e1': 'discipline',
+    '27e4c520-6f6b-11eb-84a6-c3eae4856606': 'document_nummer',
+    '502b6300-b19b-11eb-a211-dbedff274ddf': 'titel',
+    '6d83dfb0-41b0-11ea-9125-af458cfb61c4': 'controleverzoek',
+    '91ed02a0-41b0-11ea-9125-af458cfb61c4': 'controlestatus',
+    'd3ffaee0-41b0-11ea-9125-af458cfb61c4': 'contract_status',
+    'd9938cf0-055b-11ea-9ee0-4f66993176e1': 'document_soort',
+    'b6f71e70-9d38-11eb-bebe-b5fce10145cf': 'bouwdeel',
+    '15369030-c1a7-11ed-a3ee-5d6c31021d9f': 'bouwnummer',
+    '33075090-c1a7-11ed-a3ee-5d6c31021d9f': 'bedrijf',
+    'f9961070-6f6a-11eb-84a6-c3eae4856606': 'ifc_timestamp',
+  };
 
-  // Stap 2: Haal de instanties (property waarden per bestand)
-  var instances;
+  // Haal alle psets op via /libs/{libId}/psets
+  var psetsResp;
   try {
-    instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/instances');
+    psetsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets');
   } catch(e) {
-    console.warn('[TC] PSet instances pad 1 mislukt:', e.message);
-    try {
-      instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/instances');
-    } catch(e2) {
-      console.warn('[TC] PSet instances pad 2 ook mislukt:', e2.message);
-      return;
-    }
+    console.warn('[TC] PSet ophalen mislukt:', e.message);
+    return;
   }
 
-  if (!instances) { console.log('[TC] Geen PSet instances'); return; }
-  var instArray = Array.isArray(instances) ? instances : (instances.items || instances.instances || []);
+  var instArray = psetsResp.items || [];
   console.log('[TC] ' + instArray.length + ' PSet instances gevonden');
 
+  // Bouw lookup: fileVID → bestand
   var lookup = {};
   bestanden.forEach(function(b) { if (b._vid) lookup[b._vid] = b; });
 
-  var mapping = {'Document nummer':'document_nummer','Document status':'document_status','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Discipline':'discipline','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Bedrijf':'bedrijf','Titel':'titel','Document soort':'document_soort','Contract status':'contract_status','Controlestatus':'controlestatus','Controleverzoek':'controleverzoek','Tags':'tags'};
-
+  // Map metadata naar bestanden
+  var matched = 0;
   for (var j = 0; j < instArray.length; j++) {
     var inst = instArray[j];
-    for (var j = 0; j < instances.length; j++) {
-      var inst = instances[j];
-      var b = lookup[inst.linkId || inst.objectId || ''];
-      if (!b) continue;
-      var props = inst.properties || inst.props || {};
-      for (var psetNaam in mapping) {
-        var docKey = mapping[psetNaam];
-        for (var propNaam in props) {
-          if (propNaam.toLowerCase().includes(psetNaam.toLowerCase())) {
-            var val = typeof props[propNaam] === 'object' ? (props[propNaam].value || '') : props[propNaam];
-            if (val && !b[docKey]) b[docKey] = String(val).trim();
-          }
-        }
+    // link format: "frn:tcfile:{VID}" → extract VID
+    var link = inst.link || '';
+    var vid = link.replace('frn:tcfile:', '');
+    var b = lookup[vid];
+    if (!b) continue;
+    matched++;
+    var props = inst.props || {};
+    for (var propId in props) {
+      var veldNaam = PROP_MAP[propId];
+      if (veldNaam && props[propId] && props[propId] !== '--') {
+        b[veldNaam] = String(props[propId]).trim();
       }
     }
   }
+  console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
 }
 
 // === STANDALONE UPLOAD ===
