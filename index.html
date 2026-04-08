@@ -711,7 +711,7 @@ function bouwTH() {
   if (editMode) {
     var thCb = document.createElement('th'); thCb.style.width = '30px';
     var cb = document.createElement('input'); cb.type = 'checkbox';
-    cb.onchange = function() { var checked = cb.checked; docs.forEach(function(d) { if (d._canEdit) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); } }); updateSelection(); renderT(); };
+    cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (d._canEdit) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); } }); updateSelection(); /* update checkboxes without full re-render */ document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
     thCb.appendChild(cb); tr.appendChild(thCb);
   }
   COLS.forEach(function(c) {
@@ -801,6 +801,7 @@ function renderT() {
         var tdCb = document.createElement('td'); tdCb.style.width = '30px'; tdCb.style.textAlign = 'center';
         if (doc._canEdit) {
           var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
+          cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
           cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
           tdCb.appendChild(cb);
         } else {
