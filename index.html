@@ -226,7 +226,8 @@ let docs=[], mapS={}, pid='', actMap=null, sortK='file_location', sortD='asc', s
 let tcAPI=null, tcProject=null, tcToken='', isEmbedded=false;
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
-const PSET_REGIONS = { europe:'https://pset-api.eu-west-1.connect.trimble.com/v1', 'north america':'https://pset-api.us-east-1.connect.trimble.com/v1', asia:'https://pset-api.ap-southeast-1.connect.trimble.com/v1' };
+const PSET_PROXY = 'https://tc-proxy.tom-da0.workers.dev/pset';
+const PSET_REGIONS = { europe: PSET_PROXY + '/eu', 'north america': PSET_PROXY + '/us', asia: PSET_PROXY + '/ap' };
 let TC_BASE = TC_API_REGIONS.europe;
 let PSET_BASE = PSET_REGIONS.europe;
 
