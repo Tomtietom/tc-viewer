@@ -244,6 +244,7 @@ td a:hover{text-decoration:underline}
 let docs=[], mapS={}, pid='', actMap=null, sortK='file_location', sortD='asc', selDoc=null, curPage='pgLoading';
 let tcAPI=null, tcProject=null, tcToken='', isEmbedded=false;
 let editMode=false, selectedDocs=new Set();
+var PROP_MAP = {};
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
 const PSET_PROXY = 'https://tc-proxy.tom-da0.workers.dev/pset';
@@ -403,7 +404,7 @@ function vulDocs(files) {
       contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
       controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
       _created: b._created||'', _modified: b._modified||'',
-      _canEdit: b._canEdit||false, _psetLink: b._psetLink||'',
+      _canEdit: b._canEdit !== false, _psetLink: b._psetLink||'frn:tcfile:'+(b._vid||''),
     };
   });
   mapS = {};
@@ -542,7 +543,7 @@ async function tcGetMetadata(projectId, bestanden) {
   console.log('[TC] PSet lib:', libId);
 
   // Property ID → veldnaam mapping (VW BVGO schema)
-  var PROP_MAP = {
+  PROP_MAP = {
     '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
     '3d82d630-c1a6-11ed-a3ee-5d6c31021d9f': 'document_aanmaak_datum',
     'a442e490-d47a-11ee-8133-af31c2576a74': 'revisie',
