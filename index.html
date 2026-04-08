@@ -217,7 +217,7 @@ td a:hover{text-decoration:underline}
   <div class="main">
     <div class="tbl-wrap">
       <div class="tbl-scrl"><table><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
-      <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><h3></h3><div class="dp-path"></div></div><div id="dpCnt"></div></div>
+      <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
     <div class="ftr"><span id="ftr1"></span><span id="ftr2"></span></div>
   </div>
