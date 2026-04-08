@@ -500,21 +500,46 @@ async function tcGetItemsRecursive(folderId, pad, result) {
 }
 
 async function tcGetMetadata(projectId, bestanden) {
-  var defs = await tcFetchPSet('/projects/' + projectId + '/defs');
-  if (!Array.isArray(defs) || !defs.length) { console.log('[TC] Geen PSet definities'); return; }
-  console.log('[TC] ' + defs.length + ' PSet definities');
+  // PSet API pad: /libs/tcproject:prod:{projectId}/defs/tcfiles
+  var libId = 'tcproject:prod:' + projectId;
+  console.log('[TC] PSet lib:', libId);
+
+  // Stap 1: Haal de property set definitie op
+  var defsResp;
+  try {
+    defsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+  } catch(e) {
+    console.warn('[TC] PSet defs ophalen mislukt:', e.message);
+    // Probeer alternatief pad
+    try {
+      defsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs');
+    } catch(e2) {
+      console.warn('[TC] PSet defs alternatief ook mislukt:', e2.message);
+      return;
+    }
+  }
+  console.log('[TC] PSet defs response:', JSON.stringify(defsResp).substring(0, 200));
+
+  // Stap 2: Haal de instanties (property waarden per bestand)
+  var instances;
+  try {
+    instances = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/instances');
+  } catch(e) {
+    console.warn('[TC] PSet instances ophalen mislukt:', e.message);
+    return;
+  }
+
+  if (!instances) { console.log('[TC] Geen PSet instances'); return; }
+  var instArray = Array.isArray(instances) ? instances : (instances.items || instances.instances || []);
+  console.log('[TC] ' + instArray.length + ' PSet instances gevonden');
 
   var lookup = {};
   bestanden.forEach(function(b) { if (b._vid) lookup[b._vid] = b; });
 
   var mapping = {'Document nummer':'document_nummer','Document status':'document_status','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Discipline':'discipline','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Bedrijf':'bedrijf','Titel':'titel','Document soort':'document_soort','Contract status':'contract_status','Controlestatus':'controlestatus','Controleverzoek':'controleverzoek','Tags':'tags'};
 
-  for (var d = 0; d < defs.length; d++) {
-    var defId = defs[d].id || defs[d].defId;
-    if (!defId) continue;
-    var instances;
-    try { instances = await tcFetchPSet('/projects/' + projectId + '/defs/' + defId + '/instances'); } catch(e) { continue; }
-    if (!Array.isArray(instances)) continue;
+  for (var j = 0; j < instArray.length; j++) {
+    var inst = instArray[j];
     for (var j = 0; j < instances.length; j++) {
       var inst = instances[j];
       var b = lookup[inst.linkId || inst.objectId || ''];
