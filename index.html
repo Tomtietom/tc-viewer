@@ -489,12 +489,14 @@ async function tcGetItemsRecursive(folderId, pad, result) {
   tcShowProgress(pct);
   document.getElementById('tcStatusText').textContent = 'Mappen: ' + _fetchedFolders + ' | Bestanden: ' + result.length;
 
-  // Parallelle requests (max 10 tegelijk) voor snelheid
-  var BATCH = 10;
+  // Parallelle requests (max 5 tegelijk, met foutafhandeling per request)
+  var BATCH = 5;
   for (var b = 0; b < subFolders.length; b += BATCH) {
     var batch = subFolders.slice(b, b + BATCH);
     await Promise.all(batch.map(function(sf) {
-      return tcGetItemsRecursive(sf.id, sf.pad, result);
+      return tcGetItemsRecursive(sf.id, sf.pad, result).catch(function(e) {
+        console.warn('[TC] Map overgeslagen:', sf.pad, e.message);
+      });
     }));
   }
 }
