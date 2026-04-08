@@ -163,7 +163,7 @@ td a:hover{text-decoration:underline}
 </div>
 
 <!-- TC LOADING -->
-<div class="page pg-loading" id="pgLoading">
+<div class="page pg-loading active" id="pgLoading">
   <div class="load-card">
     <h2>Documentenlijst laden</h2>
     <div class="tag" style="color:var(--af);font-size:13px;font-weight:500;margin:4px 0 20px" id="tcProjectName"></div>
@@ -174,16 +174,16 @@ td a:hover{text-decoration:underline}
     <div class="progress-track" id="tcProgress"><div class="progress-fill" id="tcProgressFill"></div></div>
     <div id="tcStatusText" style="font-size:12px;color:#888;margin-top:8px"></div>
     <div id="tcError" style="display:none;margin-top:16px;padding:12px;background:#fde8e8;border-radius:8px;color:var(--warn);font-size:12px;text-align:left"></div>
+    <div class="disc" style="margin-top:20px"><b>Powered by At Fielt</b> — Alle data wordt live opgehaald uit Trimble Connect. Er worden geen gegevens opgeslagen.</div>
   </div>
 </div>
 
-<!-- STANDALONE FALLBACK -->
+<!-- STANDALONE (niet in TC) -->
 <div class="page pg-upload" id="pgUpload">
   <div class="ucard">
     <h2>Documentenlijst Viewer</h2>
     <div class="tag">Powered by At Fielt</div>
-    <p>Deze viewer werkt als Trimble Connect extensie.<br>Open hem vanuit een TC project om automatisch data te laden.</p>
-    <div class="disc">Manifest URL: <b>https://tomtietom.github.io/tc-viewer/manifest.json</b></div>
+    <p>Open deze viewer vanuit Trimble Connect.</p>
   </div>
 </div>
 
@@ -357,6 +357,24 @@ function tcShowProgress(pct) {
   document.getElementById('tcProgressFill').style.width = pct + '%';
 }
 
+function vulDocs(files) {
+  docs = files.map(function(b) {
+    return {
+      file_location: b.file_location||'', bestandsnaam: b.bestandsnaam||'',
+      document_nummer: b.document_nummer||'', project_fase: b.project_fase||'',
+      document_datum: b.document_datum||'', revisie: b.revisie||'',
+      document_status: b.document_status||'', bedrijf: b.bedrijf||'',
+      bouwdeel: b.bouwdeel||'', bouwnummer: b.bouwnummer||'',
+      discipline: b.discipline||'', document_soort: b.document_soort||'',
+      titel: b.titel||'', tags: b.tags||'',
+      contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
+      controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
+    };
+  });
+  mapS = {};
+  docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+}
+
 async function tcAutoFetchData() {
   try {
     // === TOKEN OPHALEN (3-methode fallback) ===
@@ -411,48 +429,34 @@ async function tcAutoFetchData() {
 
     tcStep(3, 'loading', 'Bestanden ophalen...');
     var allFiles = [];
-    try { await tcGetItemsRecursive(rootId, '', allFiles); } catch(e) { console.warn('[TC] Sommige mappen overgeslagen:', e.message); }
+    try { await tcGetItemsRecursive(rootId, '', allFiles); } catch(e) { console.warn('[TC] Sommige mappen overgeslagen'); }
     tcStep(3, 'done', allFiles.length + ' bestanden gevonden');
+    console.log('[TC] Bestanden klaar:', allFiles.length);
+
+    // Vul docs alvast (zonder metadata)
+    vulDocs(allFiles);
 
     // === METADATA OPHALEN ===
     tcStep(4, 'loading', 'Metadata ophalen...');
     try {
       await tcGetMetadata(pid, allFiles);
-      var metaCount = allFiles.filter(function(f) { return f.document_status || f.discipline || f.project_fase; }).length;
+      vulDocs(allFiles); // Opnieuw vullen met metadata
+      var metaCount = docs.filter(function(f) { return f.document_status || f.discipline || f.project_fase; }).length;
       tcStep(4, 'done', 'Metadata: ' + metaCount + ' bestanden');
     } catch(e) {
       console.warn('[TC] Metadata mislukt:', e.message);
       tcStep(4, 'error', 'Metadata niet beschikbaar');
     }
 
-    // === DOCS VULLEN + DASHBOARD TONEN ===
-    function vulDocs(files) {
-      docs = files.map(function(b) {
-        return {
-          file_location: b.file_location||'', bestandsnaam: b.bestandsnaam||'',
-          document_nummer: b.document_nummer||'', project_fase: b.project_fase||'',
-          document_datum: b.document_datum||'', revisie: b.revisie||'',
-          document_status: b.document_status||'', bedrijf: b.bedrijf||'',
-          bouwdeel: b.bouwdeel||'', bouwnummer: b.bouwnummer||'',
-          discipline: b.discipline||'', document_soort: b.document_soort||'',
-          titel: b.titel||'', tags: b.tags||'',
-          contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
-          controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
-        };
-      });
-      mapS = {};
-      docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
-    }
-    vulDocs(allFiles);
-
-    // Direct naar dashboard
+    // === DASHBOARD TONEN ===
+    console.log('[TC] Dashboard tonen, docs:', docs.length);
     goTo('pgDash');
     renderDash();
 
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
-    // Toon dashboard met wat we hebben, ook bij fouten
     if (docs.length > 0) {
+      console.log('[TC] Fout maar toon dashboard met', docs.length, 'docs');
       goTo('pgDash');
       renderDash();
     } else {
@@ -589,16 +593,27 @@ function renderDash() {
   }).join('');
 
   el.innerHTML = '<div class="big-stats">' +
-    '<div class="bstat"><div class="lab">Documenten</div><div class="val">' + total + '</div></div>' +
-    '<div class="bstat"><div class="lab">Mappen</div><div class="val">' + Object.keys(mapS).length + '</div></div>' +
-    '<div class="bstat"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">' + (stCnt['Definitief']||0) + '</div></div>' +
+    '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Documenten</div><div class="val">' + total + '</div></div>' +
+    '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Mappen</div><div class="val">' + Object.keys(mapS).length + '</div></div>' +
+    '<div class="bstat" style="cursor:pointer" onclick="filterEnToon(\'document_status\',\'Definitief\')"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">' + (stCnt['Definitief']||0) + '</div></div>' +
     '</div>' +
     '<div class="dash-grid">' +
-    '<div class="dcard"><h3>Status verdeling</h3><div class="donut-wrap"><div class="donut" style="background:'+donutCSS+'"><div class="donut-c">'+stTotal+'</div></div><div class="donut-leg">'+Object.entries(stCnt).sort(function(a,b){return b[1]-a[1]}).map(function(e){return '<div><span class="dot" style="background:'+(STATUS_KLEUR[e[0]]||'#ccc')+'"></span>'+e[0]+': <b>'+e[1]+'</b></div>';}).join('')+'</div></div></div>' +
+    '<div class="dcard"><h3>Status verdeling</h3><div class="donut-wrap"><div class="donut" style="background:'+donutCSS+'"><div class="donut-c">'+stTotal+'</div></div><div class="donut-leg">'+Object.entries(stCnt).sort(function(a,b){return b[1]-a[1]}).map(function(e){return '<div style="cursor:pointer" onclick="filterEnToon(\'document_status\',\''+e[0]+'\')"><span class="dot" style="background:'+(STATUS_KLEUR[e[0]]||'#ccc')+'"></span>'+e[0]+': <b>'+e[1]+'</b></div>';}).join('')+'</div></div></div>' +
     '<div class="dcard"><h3>Verplichte velden (Van der Poel)</h3>' + veldHTML + '</div>' +
-    '<div class="dcard"><h3>Discipline</h3>' + diSorted.map(function(e){return '<div class="bar-r"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxDi*100+'%;background:var(--af)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
+    '<div class="dcard"><h3>Discipline</h3>' + diSorted.map(function(e){return '<div class="bar-r" style="cursor:pointer" onclick="filterEnToon(\'discipline\',\''+e[0]+'\')"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxDi*100+'%;background:var(--af)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
     '</div>' +
     '<div style="display:flex;gap:12px;margin-top:8px"><button class="nav-btn" onclick="toonDocs()">Bekijk documentenlijst &#8594;</button><button class="nav-btn sec" onclick="exportCSV()">&#11015; CSV</button></div>';
+}
+
+// Filter vanuit dashboard en spring naar docs
+function filterEnToon(filterType, waarde) {
+  toonDocs();
+  var filterMap = { document_status: 'fStat', discipline: 'fDisc', project_fase: 'fFase', bouwdeel: 'fBouw' };
+  var selectId = filterMap[filterType];
+  if (selectId) {
+    var sel = document.getElementById(selectId);
+    if (sel) { sel.value = waarde; renderT(); }
+  }
 }
 
 // === DOCUMENTEN ===
