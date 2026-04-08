@@ -719,7 +719,7 @@ function renderT() {
         var td = document.createElement('td'), v = doc[c.k] || '';
         if (c.k==='bestandsnaam' && pid && doc._vid) {
           var a = document.createElement('a');
-          a.href = 'https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+doc._vid+'&version=';
+          a.href = tcFileUrl(doc._vid, doc.bestandsnaam);
           a.target='_blank'; a.textContent=v; a.title='Open in TC (laatste versie)';
           a.onclick = function(e) { e.stopPropagation(); };
           td.appendChild(a);
@@ -732,6 +732,13 @@ function renderT() {
   });
   document.getElementById('ftr1').textContent = filtered.length + ' van ' + docs.length + ' documenten';
   document.getElementById('ftr2').textContent = Object.keys(pm).length + ' mappen';
+}
+
+var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
+function tcFileUrl(vid, naam) {
+  var ext = (naam || '').split('.').pop().toLowerCase();
+  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/3D?id='+vid;
+  return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+vid+'&version=';
 }
 
 function sBdg(s) {
@@ -749,7 +756,7 @@ function toonDetail(doc) {
   var html = '<div class="dp-sec"><h4>Metadata</h4>';
   velden.forEach(function(f) { if (f[1]) { var d=f[1]; if (f[0]==='Status') d=sBdg(f[1]); html += '<div class="dp-row"><span class="dl">'+f[0]+'</span><span class="dv">'+d+'</span></div>'; } });
   html += '</div>';
-  if (pid && doc._vid) { html += '<a class="dp-tc" href="https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+doc._vid+'&version=" target="_blank">Open in Trimble Connect &#8599;</a>'; }
+  if (pid && doc._vid) { html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam)+'" target="_blank">Open in Trimble Connect &#8599;</a>'; }
   document.getElementById('dpCnt').innerHTML = html;
   renderT();
 }
