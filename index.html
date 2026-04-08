@@ -613,6 +613,14 @@ function renderDash() {
   var diCnt = {}; docs.forEach(function(d) { var s = d.discipline; if (s) diCnt[s] = (diCnt[s]||0)+1; });
   var diSorted = Object.entries(diCnt).sort(function(a,b) { return b[1]-a[1]; });
   var maxDi = diSorted.length ? diSorted[0][1] : 1;
+  var faCnt = {}; docs.forEach(function(d) { var s = d.project_fase; if (s) faCnt[s] = (faCnt[s]||0)+1; });
+  var faSorted = Object.entries(faCnt).sort(function(a,b) { return b[1]-a[1]; });
+  var maxFa = faSorted.length ? faSorted[0][1] : 1;
+
+  // Metadata completheid totaal
+  var metaDocs = docs.filter(function(d) { return d.document_status || d.discipline || d.project_fase || d.document_datum; }).length;
+  var metaPct = total > 0 ? Math.round(metaDocs / total * 100) : 0;
+  var zonderMeta = total - metaDocs;
 
   var offset = 0, donutParts = [];
   Object.entries(stCnt).sort(function(a,b) { return b[1]-a[1]; }).forEach(function(e) {
@@ -627,18 +635,27 @@ function renderDash() {
     var filled = docs.filter(function(d) { return d[veld] && d[veld].trim(); }).length;
     var pct = total > 0 ? Math.round(filled / total * 100) : 0;
     var klr = pct >= 80 ? 'var(--ok)' : pct >= 50 ? 'var(--af)' : 'var(--warn)';
-    return '<div class="veld-card"><div class="veld-ring" style="background:conic-gradient('+klr+' 0% '+pct+'%, #f0ebe5 '+pct+'% 100%)"><div class="veld-ring-c">'+pct+'%</div></div><div class="veld-info"><div class="veld-naam">'+VERPLICHT_LABEL[veld]+'</div><div class="veld-detail">'+filled+' van '+total+' ingevuld</div><div class="veld-bar"><div class="veld-fill" style="width:'+pct+'%;background:'+klr+'"></div></div></div></div>';
+    return '<div class="veld-card" style="cursor:pointer" onclick="filterEnToon(\''+veld+'\',\'\')"><div class="veld-ring" style="background:conic-gradient('+klr+' 0% '+pct+'%, #f0ebe5 '+pct+'% 100%)"><div class="veld-ring-c">'+pct+'%</div></div><div class="veld-info"><div class="veld-naam">'+VERPLICHT_LABEL[veld]+'</div><div class="veld-detail">'+filled+' van '+total+' ingevuld</div><div class="veld-bar"><div class="veld-fill" style="width:'+pct+'%;background:'+klr+'"></div></div></div></div>';
   }).join('');
 
-  el.innerHTML = '<div class="big-stats">' +
+  // Projectnaam + datum
+  var projNaam = (tcProject && tcProject.name) ? tcProject.name : '';
+  var vandaag = new Date().toLocaleDateString('nl-NL', {day:'2-digit',month:'long',year:'numeric'});
+
+  el.innerHTML =
+    '<div style="margin-bottom:16px"><h2 style="font-family:Montserrat,sans-serif;font-size:20px;font-weight:700">' + projNaam + '</h2><div style="font-size:12px;color:#888">' + vandaag + ' &mdash; ' + total + ' documenten in ' + Object.keys(mapS).length + ' mappen</div></div>' +
+    '<div class="big-stats">' +
     '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Documenten</div><div class="val">' + total + '</div></div>' +
     '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Mappen</div><div class="val">' + Object.keys(mapS).length + '</div></div>' +
     '<div class="bstat" style="cursor:pointer" onclick="filterEnToon(\'document_status\',\'Definitief\')"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">' + (stCnt['Definitief']||0) + '</div></div>' +
+    '<div class="bstat"><div class="lab">Met metadata</div><div class="val" style="color:var(--info)">' + metaPct + '%</div></div>' +
+    '<div class="bstat"><div class="lab">Zonder metadata</div><div class="val" style="color:' + (zonderMeta > 0 ? 'var(--warn)' : 'var(--ok)') + '">' + zonderMeta + '</div></div>' +
     '</div>' +
     '<div class="dash-grid">' +
     '<div class="dcard"><h3>Status verdeling</h3><div class="donut-wrap"><div class="donut" style="background:'+donutCSS+'"><div class="donut-c">'+stTotal+'</div></div><div class="donut-leg">'+Object.entries(stCnt).sort(function(a,b){return b[1]-a[1]}).map(function(e){return '<div style="cursor:pointer" onclick="filterEnToon(\'document_status\',\''+e[0]+'\')"><span class="dot" style="background:'+(STATUS_KLEUR[e[0]]||'#ccc')+'"></span>'+e[0]+': <b>'+e[1]+'</b></div>';}).join('')+'</div></div></div>' +
-    '<div class="dcard"><h3>Verplichte velden (Van der Poel)</h3>' + veldHTML + '</div>' +
+    '<div class="dcard"><h3>Verplichte metadata</h3>' + veldHTML + '</div>' +
     '<div class="dcard"><h3>Discipline</h3>' + diSorted.map(function(e){return '<div class="bar-r" style="cursor:pointer" onclick="filterEnToon(\'discipline\',\''+e[0]+'\')"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxDi*100+'%;background:var(--af)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
+    '<div class="dcard"><h3>Fase</h3>' + faSorted.map(function(e){return '<div class="bar-r" style="cursor:pointer" onclick="filterEnToon(\'project_fase\',\''+e[0]+'\')"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxFa*100+'%;background:var(--info)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
     '</div>' +
     '<div style="display:flex;gap:12px;margin-top:8px"><button class="nav-btn" onclick="toonDocs()">Bekijk documentenlijst &#8594;</button><button class="nav-btn sec" onclick="exportCSV()">&#11015; CSV</button></div>';
 }
