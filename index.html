@@ -177,7 +177,7 @@ td a:hover{text-decoration:underline}
     <div class="progress-track" id="tcProgress"><div class="progress-fill" id="tcProgressFill"></div></div>
     <div id="tcStatusText" style="font-size:12px;color:#888;margin-top:8px"></div>
     <div id="tcError" style="display:none;margin-top:16px;padding:12px;background:#fde8e8;border-radius:8px;color:var(--warn);font-size:12px;text-align:left"></div>
-    <div class="disc" style="margin-top:20px"><b>Powered by At Fielt</b> — Alle data wordt live opgehaald uit Trimble Connect. Er worden geen gegevens opgeslagen.</div>
+    <div class="disc" style="margin-top:20px"><b>Powered by At Fielt</b> — Alle data wordt live opgehaald uit Trimble Connect. Er worden geen gegevens opgeslagen. Links verwijzen altijd naar de laatste versie van het bestand.</div>
   </div>
 </div>
 
@@ -235,7 +235,7 @@ td a:hover{text-decoration:underline}
       <div class="tbl-scrl"><table><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span id="ftr2"></span></div>
+    <div class="ftr"><span id="ftr1"></span><span style="opacity:.5">Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
   </div>
 </div>
 
@@ -859,7 +859,7 @@ function fmtDate(s) {
 var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
 function tcFileUrl(vid, naam) {
   var ext = (naam || '').split('.').pop().toLowerCase();
-  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/detailviewer?fileId='+vid+'&versionId='+vid;
+  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/detailviewer?fileId='+vid+'&versionId=';
   return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+vid+'&version=';
 }
 
