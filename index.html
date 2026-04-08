@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="xlsx.full.min.js"></script>
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -178,22 +177,13 @@ td a:hover{text-decoration:underline}
   </div>
 </div>
 
-<!-- UPLOAD (standalone fallback) -->
+<!-- STANDALONE FALLBACK -->
 <div class="page pg-upload" id="pgUpload">
   <div class="ucard">
     <h2>Documentenlijst Viewer</h2>
     <div class="tag">Powered by At Fielt</div>
-    <p>Upload je Trimble Connect documentenlijst-export (.xlsx) om een interactief overzicht te krijgen.</p>
-    <div class="dz" id="dz1">
-      <div class="ic">&#128196;</div>
-      <div>Sleep je <strong>export</strong> (.xlsx met metadata)</div>
-      <div style="margin:6px 0;color:#999;font-size:12px">of</div>
-      <label for="f1">Klik om te selecteren</label>
-      <input type="file" id="f1" accept=".xlsx,.xls">
-    </div>
-    <div class="up-group" id="ug1" style="display:none"><h3>Export</h3><div class="st" id="st1"></div></div>
-    <button class="go-btn" id="goBtn" disabled onclick="toonDashboard()">Bekijk dashboard</button>
-    <div class="disc"><b>Privacy:</b> Alles wordt lokaal verwerkt. Er worden geen gegevens verstuurd.</div>
+    <p>Deze viewer werkt als Trimble Connect extensie.<br>Open hem vanuit een TC project om automatisch data te laden.</p>
+    <div class="disc">Manifest URL: <b>https://tomtietom.github.io/tc-viewer/manifest.json</b></div>
   </div>
 </div>
 
@@ -498,16 +488,13 @@ async function tcGetItemsRecursive(folderId, pad, result) {
   tcShowProgress(pct);
   document.getElementById('tcStatusText').textContent = 'Mappen: ' + _fetchedFolders + ' | Bestanden: ' + result.length;
 
-  // Parallelle requests (max 3 tegelijk, met delay en foutafhandeling)
-  var BATCH = 3;
+  // Parallelle requests (max 8 tegelijk, met foutafhandeling)
+  var BATCH = 8;
   for (var b = 0; b < subFolders.length; b += BATCH) {
     var batch = subFolders.slice(b, b + BATCH);
     await Promise.all(batch.map(function(sf) {
-      return tcGetItemsRecursive(sf.id, sf.pad, result).catch(function(e) {
-        console.warn('[TC] Map overgeslagen:', sf.pad);
-      });
+      return tcGetItemsRecursive(sf.id, sf.pad, result).catch(function() {});
     }));
-    if (b + BATCH < subFolders.length) await new Promise(function(r) { setTimeout(r, 100); });
   }
 }
 
@@ -572,45 +559,7 @@ async function tcGetMetadata(projectId, bestanden) {
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
 }
 
-// === STANDALONE UPLOAD ===
-function setupDZ(dzId, fId, handler) {
-  var dz = document.getElementById(dzId), fi = document.getElementById(fId);
-  dz.addEventListener('click', function(e) { if (e.target.tagName !== 'LABEL') fi.click(); });
-  dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('over'); });
-  dz.addEventListener('dragleave', function() { dz.classList.remove('over'); });
-  dz.addEventListener('drop', function(e) { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files.length) handler(e.dataTransfer.files[0]); });
-  fi.addEventListener('change', function() { if (fi.files.length) handler(fi.files[0]); });
-}
-setupDZ('dz1','f1', function(file) {
-  var ug = document.getElementById('ug1'); ug.style.display = 'block';
-  var st = document.getElementById('st1'); st.textContent = 'Laden...'; st.className = 'st';
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      var wb = XLSX.read(e.target.result, { type: 'array' });
-      var ws = wb.Sheets['Documentenlijst'] || wb.Sheets['Files'] || wb.Sheets[wb.SheetNames[0]];
-      var data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      var hRow = -1;
-      for (var i = 0; i < Math.min(data.length, 20); i++) { if (data[i] && String(data[i][0]).trim() === 'File location') { hRow = i; break; } }
-      if (hRow === -1) { st.textContent = '"File location" niet gevonden'; return; }
-      var hdr = data[hRow], ki = {};
-      hdr.forEach(function(h, i) { var k = TCM[String(h).trim()]; if (k) ki[k] = i; });
-      docs = [];
-      for (var r = hRow + 1; r < data.length; r++) {
-        var rij = data[r]; if (!rij || !rij[ki.bestandsnaam]) continue;
-        var d = {};
-        for (var key in ki) { var v = rij[ki[key]]; d[key] = v != null ? String(v).trim() : ''; }
-        if (d.bestandsnaam) docs.push(d);
-      }
-      mapS = {};
-      docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
-      st.textContent = docs.length + ' documenten, ' + Object.keys(mapS).length + ' mappen';
-      st.className = 'st ok';
-      document.getElementById('goBtn').disabled = false;
-    } catch(err) { st.textContent = 'Fout: ' + err.message; }
-  };
-  reader.readAsArrayBuffer(file);
-});
+// (Standalone upload verwijderd — alleen TC extensie modus)
 
 // === DASHBOARD ===
 function toonDashboard() { goTo('pgDash'); renderDash(); }
