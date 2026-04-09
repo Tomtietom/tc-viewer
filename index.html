@@ -1676,7 +1676,7 @@ async function saveCell(doc, field, value) {
 }
 
 // === DELEN ===
-var _lastShareUrl = '', _lastShareDocs = [];
+var _lastShareUrl = '', _lastShareDocs = [], _lastShareLinks = [];
 
 function openShareDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
@@ -1747,21 +1747,16 @@ async function sendShare(method) {
     var result = await resp.json();
     console.log('[Share] Volledige API response:', JSON.stringify(result, null, 2));
 
-    // Zoek de juiste publieke share URL
-    // TC geeft per object een url als /s/{token} — dat is de publieke link
-    var shareUrls = (result.objects || []).map(function(o) { return o.url || ''; }).filter(function(u) { return u; });
-    // Als er een share-level URL is, gebruik die (werkt voor meerdere bestanden)
-    if (result.url) {
-      _lastShareUrl = result.url.startsWith('http') ? result.url : 'https://web.connect.trimble.com' + result.url;
-    } else if (shareUrls.length === 1) {
-      _lastShareUrl = 'https://web.connect.trimble.com' + shareUrls[0];
-    } else if (shareUrls.length > 1) {
-      // Meerdere bestanden: gebruik de share ID voor een overzichtslink
-      _lastShareUrl = result.id ? 'https://web.connect.trimble.com/tc/app/share/' + result.id : 'https://web.connect.trimble.com' + shareUrls[0];
-    } else {
-      _lastShareUrl = '';
+    // Bouw per-bestand publieke links
+    var shareObjects = result.objects || [];
+    _lastShareLinks = [];
+    for (var si = 0; si < _lastShareDocs.length; si++) {
+      var sObj = shareObjects[si];
+      var sUrl = sObj && sObj.url ? 'https://web.connect.trimble.com' + sObj.url : '';
+      _lastShareLinks.push({ name: _lastShareDocs[si].bestandsnaam, url: sUrl });
     }
-    console.log('[Share] Gebruikte URL:', _lastShareUrl);
+    _lastShareUrl = _lastShareLinks.length === 1 ? _lastShareLinks[0].url : '';
+    console.log('[Share] Links per bestand:', _lastShareLinks);
 
     // Markeer bestanden als gedeeld (localStorage)
     var shareLog = JSON.parse(localStorage.getItem('doclist-shared-' + pid) || '{}');
@@ -1784,7 +1779,8 @@ async function sendShare(method) {
       ? _lastShareDocs.length + ' bestanden gedeeld via TC met ' + emails.join(', ')
       : _lastShareDocs.length + ' bestanden — link aangemaakt, email geopend';
     document.getElementById('shareSuccessMsg').textContent = successMsg;
-    document.getElementById('shareLink').textContent = _lastShareUrl || 'Link beschikbaar in Trimble Connect';
+    var linkHtml = _lastShareLinks.map(function(l) { return l.url ? '<a href="'+l.url+'" target="_blank" style="color:var(--af);text-decoration:none;display:block;padding:2px 0">'+l.name+'</a>' : l.name; }).join('');
+    document.getElementById('shareLink').innerHTML = linkHtml || 'Links beschikbaar in Trimble Connect';
 
     console.log('[Share] Succesvol:', result);
   } catch(e) {
@@ -1795,8 +1791,8 @@ async function sendShare(method) {
 }
 
 function copyShareLink() {
-  var text = _lastShareUrl + '\n\n--- Documentenlijst ---\n' + _lastShareDocs.map(function(d) {
-    return d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
+  var text = '--- Documentenlijst ---\n' + _lastShareLinks.map(function(l) {
+    return l.name + (l.url ? '\n  ' + l.url : '');
   }).join('\n');
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(function() { alert('Link + doclijst gekopieerd naar klembord!'); });
@@ -1812,10 +1808,10 @@ function openShareInMail() {
   var userMsg = document.getElementById('shareMsg').value || '';
   var projNaam = (tcProject && tcProject.name) ? tcProject.name : 'Project';
   var subject = 'Documenten gedeeld: ' + projNaam;
-  var docList = _lastShareDocs.map(function(d) {
-    return '- ' + d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
+  var docList = _lastShareLinks.map(function(l) {
+    return '- ' + l.name + (l.url ? '\n  ' + l.url : '');
   }).join('\n');
-  var body = (userMsg ? userMsg + '\n\n' : '') + 'Documenten uit ' + projNaam + ':\n\n' + docList + '\n\nOpen de bestanden via deze link:\n' + (_lastShareUrl || '(link niet beschikbaar)') + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
+  var body = (userMsg ? userMsg + '\n\n' : '') + 'Documenten uit ' + projNaam + ':\n\n' + docList + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
   var mailto = 'mailto:' + encodeURIComponent(emails) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
   window.open(mailto, '_blank');
 }
