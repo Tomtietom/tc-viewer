@@ -1091,7 +1091,7 @@ async function bulkSave() {
 
   var libId = 'tcproject:prod:' + pid;
   // Bouw één changeset voor alle bestanden (max 500 per batch)
-  var changeset = toSave.map(function(doc) {
+  var changeItems = toSave.map(function(doc) {
     var props = {}; props[propId] = value;
     return { link: doc._psetLink || 'frn:tcfile:' + doc._vid, libId: libId, defId: 'tcfiles', props: props };
   });
@@ -1101,7 +1101,7 @@ async function bulkSave() {
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify(changeset)
+      body: JSON.stringify({ items: changeItems })
     });
     if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
     toSave.forEach(function(doc) { doc[field] = value; });
@@ -1125,11 +1125,10 @@ async function saveCell(doc, field, value) {
   var props = {}; props[propId] = value;
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
   try {
-    var changeset = [{ link: link, libId: libId, defId: 'tcfiles', props: props }];
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify(changeset)
+      body: JSON.stringify({ items: [{ link: link, libId: libId, defId: 'tcfiles', props: props }] })
     });
     if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
     doc[field] = value;
