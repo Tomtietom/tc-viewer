@@ -1204,7 +1204,6 @@ function renderT() {
       cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
       tdCb.appendChild(cb);
       tr.appendChild(tdCb);
-      }
 
       COLS.forEach(function(c) {
         var td = document.createElement('td');
