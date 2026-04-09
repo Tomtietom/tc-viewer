@@ -206,27 +206,26 @@ td a:hover{text-decoration:underline}
   <div class="sidebar">
     <div class="sb-sec">
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
-      <div class="frow"><select id="fDisc"><option value="">Discipline</option></select><select id="fStat"><option value="">Status</option></select></div>
-      <div class="frow"><select id="fFase"><option value="">Fase</option></select><select id="fBouw"><option value="">Bouwdeel</option></select></div>
-      <div class="frow"><select id="fBedr"><option value="">Bedrijf</option></select></div>
+      <div id="filterRows"></div>
       <div class="frow" style="margin-top:8px">
-        <select id="fGroep" onchange="renderT()" style="flex:1;font-weight:600">
-          <option value="">Geen groepering</option>
-          <option value="file_location">Groepeer: Map</option>
-          <option value="discipline">Groepeer: Discipline</option>
-          <option value="document_status">Groepeer: Status</option>
-          <option value="project_fase">Groepeer: Fase</option>
-          <option value="bouwdeel">Groepeer: Bouwdeel</option>
-          <option value="bedrijf">Groepeer: Bedrijf</option>
-          <option value="document_soort">Groepeer: Document soort</option>
-        </select>
+        <select id="fGroep" onchange="renderT()" style="flex:1;font-weight:600"></select>
+      </div>
+    </div>
+    <div class="sb-sec" id="colSec">
+      <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="document.getElementById('colList').style.display=document.getElementById('colList').style.display==='none'?'block':'none'">Kolommen <span style="font-size:9px;opacity:.5">&#9660;</span></h3>
+      <div id="colList" style="display:none;margin-top:6px">
+        <div id="colChecks"></div>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button onclick="addMetaCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Metadata</button>
+          <button onclick="addCustomCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Eigen kolom</button>
+        </div>
       </div>
     </div>
     <div class="sb-sec"><h3>Mappen</h3></div>
     <div class="tree" id="treeList"></div>
   </div>
   <div class="main">
-    <div id="editBar" style="display:none;padding:6px 12px;background:#fff8f0;border-bottom:1px solid #f0dcc8;font-size:12px;display:flex;align-items:center;gap:10px">
+    <div id="editBar" style="display:none;padding:6px 12px;background:#fff8f0;border-bottom:1px solid #f0dcc8;font-size:12px;align-items:center;gap:10px">
       <span id="editSelCount" style="font-weight:600;color:var(--af)"></span>
       <select id="bulkField" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
         <option value="">Veld kiezen...</option>
@@ -268,8 +267,9 @@ const VERPLICHT = ['document_status','discipline','project_fase','document_datum
 const VERPLICHT_LABEL = {'document_status':'Document status','discipline':'Discipline','project_fase':'Project fase','document_datum':'Document datum'};
 const STATUS_KLEUR = {'Definitief':'var(--ok)','Voor uitvoering':'var(--info)','Concept':'#888','Vervallen':'var(--warn)'};
 
-const COLS = [
-  {k:'bestandsnaam',l:'Bestandsnaam',w:'20%'},
+// === KOLOM CONFIGURATIE ===
+const ALL_COLS = [
+  {k:'bestandsnaam',l:'Bestandsnaam',w:'20%',fixed:true},
   {k:'document_nummer',l:'Doc.nr',w:'8%'},
   {k:'bouwdeel',l:'Bouwdeel',w:'7%'},
   {k:'titel',l:'Omschrijving',w:'15%'},
@@ -280,7 +280,46 @@ const COLS = [
   {k:'document_datum',l:'Datum',w:'7%'},
   {k:'document_status',l:'Status',w:'8%'},
   {k:'_created',l:'Toegevoegd',w:'7%'},
+  {k:'document_soort',l:'Document soort',w:'8%'},
+  {k:'tags',l:'Tags',w:'8%'},
+  {k:'bouwnummer',l:'Bouwnummer',w:'6%'},
+  {k:'contract_status',l:'Contract status',w:'8%'},
+  {k:'controlestatus',l:'Controlestatus',w:'8%'},
+  {k:'controleverzoek',l:'Controleverzoek',w:'8%'},
 ];
+var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_created'];
+var visibleColKeys = new Set(DEFAULT_VISIBLE);
+var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
+var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
+var _customCounter = 0;
+
+function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
+function loadColConfig() {
+  try {
+    var raw = localStorage.getItem(getColConfigKey());
+    if (!raw) return;
+    var cfg = JSON.parse(raw);
+    if (cfg.visible && Array.isArray(cfg.visible)) visibleColKeys = new Set(cfg.visible);
+    if (cfg.custom && Array.isArray(cfg.custom)) customCols = cfg.custom;
+    if (cfg.customData) customData = cfg.customData;
+    _customCounter = customCols.length;
+  } catch(e) { console.warn('[Cols] Config laden mislukt:', e); }
+}
+function saveColConfig() {
+  try {
+    localStorage.setItem(getColConfigKey(), JSON.stringify({
+      visible: Array.from(visibleColKeys),
+      custom: customCols,
+      customData: customData
+    }));
+  } catch(e) { console.warn('[Cols] Config opslaan mislukt:', e); }
+}
+function getCols() {
+  var cols = ALL_COLS.filter(function(c) { return visibleColKeys.has(c.k); });
+  return cols.concat(customCols.filter(function(c) { return visibleColKeys.has(c.k); }));
+}
+// Oud COLS alias voor compatibiliteit tijdens migratie
+var COLS = getCols();
 
 const TCM = {'File location':'file_location','Bestandsnaam':'bestandsnaam','Document nummer':'document_nummer','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Document status':'document_status','Bedrijf':'bedrijf','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Contract status':'contract_status','Controlestatus (door controlerende partij)':'controlestatus','Controleverzoek':'controleverzoek','Discipline':'discipline','Document aanmaak datum':'document_aanmaak_datum','Document soort':'document_soort','IFC timestamp':'ifc_timestamp','Tags':'tags','Titel':'titel'};
 
@@ -678,29 +717,61 @@ function renderDash() {
 // Filter vanuit dashboard en spring naar docs
 function filterEnToon(filterType, waarde) {
   toonDocs();
-  var filterMap = { document_status: 'fStat', discipline: 'fDisc', project_fase: 'fFase', bouwdeel: 'fBouw', bedrijf: 'fBedr' };
-  var selectId = filterMap[filterType];
-  if (selectId) {
-    var sel = document.getElementById(selectId);
-    if (sel) { sel.value = waarde; renderT(); }
-  }
+  var sel = document.getElementById('fCol_' + filterType);
+  if (sel) { sel.value = waarde; renderT(); }
 }
 
 // === DOCUMENTEN ===
 function toonDocs() {
   goTo('pgDocs');
   if (!document.getElementById('tHead').children.length) {
-    vulFilters(); bouwBoom(); bouwTH(); renderT();
+    loadColConfig(); COLS = getCols();
+    vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
     document.getElementById('searchBox').addEventListener('input', renderT);
-    ['fDisc','fStat','fFase','fBouw','fBedr'].forEach(function(id) { document.getElementById(id).addEventListener('change', renderT); });
   }
 }
 
+// Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
+var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','titel'];
+function getFilterableCols() {
+  return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1 && !c.custom; });
+}
+
 function vulFilters() {
-  var s = {discipline:new Set(),document_status:new Set(),project_fase:new Set(),bouwdeel:new Set(),bedrijf:new Set()};
-  docs.forEach(function(d) { for (var k in s) { if (d[k]) s[k].add(d[k]); } });
-  function fill(id, set) { var sel = document.getElementById(id); Array.from(set).sort().forEach(function(w) { var o = document.createElement('option'); o.value=w; o.textContent=w; sel.appendChild(o); }); }
-  fill('fDisc',s.discipline); fill('fStat',s.document_status); fill('fFase',s.project_fase); fill('fBouw',s.bouwdeel); fill('fBedr',s.bedrijf);
+  var filterCols = getFilterableCols();
+  // Verzamel unieke waarden per kolom
+  var sets = {};
+  filterCols.forEach(function(c) { sets[c.k] = new Set(); });
+  docs.forEach(function(d) { for (var k in sets) { if (d[k]) sets[k].add(d[k]); } });
+
+  // Bouw filter dropdowns (2 per rij)
+  var container = document.getElementById('filterRows');
+  container.innerHTML = '';
+  for (var i = 0; i < filterCols.length; i += 2) {
+    var row = document.createElement('div'); row.className = 'frow';
+    for (var j = i; j < Math.min(i + 2, filterCols.length); j++) {
+      var c = filterCols[j];
+      var sel = document.createElement('select');
+      sel.id = 'fCol_' + c.k;
+      sel.dataset.fk = c.k;
+      var defOpt = document.createElement('option'); defOpt.value = ''; defOpt.textContent = c.l; sel.appendChild(defOpt);
+      Array.from(sets[c.k]).sort().forEach(function(w) { var o = document.createElement('option'); o.value = w; o.textContent = w; sel.appendChild(o); });
+      sel.addEventListener('change', renderT);
+      row.appendChild(sel);
+    }
+    container.appendChild(row);
+  }
+
+  // Groepering dropdown
+  var grp = document.getElementById('fGroep');
+  var curGrp = grp.value || '';
+  grp.innerHTML = '';
+  var g0 = document.createElement('option'); g0.value = ''; g0.textContent = 'Geen groepering'; grp.appendChild(g0);
+  var gMap = document.createElement('option'); gMap.value = 'file_location'; gMap.textContent = 'Groepeer: Map'; grp.appendChild(gMap);
+  filterCols.forEach(function(c) {
+    var o = document.createElement('option'); o.value = c.k; o.textContent = 'Groepeer: ' + c.l; grp.appendChild(o);
+  });
+  grp.value = curGrp;
 }
 
 function bouwBoom() {
@@ -736,6 +807,63 @@ function mkTR(naam, cnt, depth, hasCh) {
 }
 function togN(el) { el.classList.toggle('open'); var ch = el.closest('.tr-row').parentElement.nextElementSibling; if (ch && ch.classList.contains('tr-ch')) ch.classList.toggle('hide'); }
 
+// === KOLOM UI ===
+function renderColChecks() {
+  var el = document.getElementById('colChecks');
+  if (!el) return;
+  var html = '';
+  ALL_COLS.forEach(function(c) {
+    var checked = visibleColKeys.has(c.k) ? ' checked' : '';
+    var disabled = c.fixed ? ' disabled' : '';
+    html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;padding:1px 0;cursor:pointer"><input type="checkbox" data-ck="'+c.k+'"'+checked+disabled+' onchange="toggleCol(\''+c.k+'\')"> '+c.l+'</label>';
+  });
+  customCols.forEach(function(c) {
+    html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;padding:1px 0;cursor:pointer"><input type="checkbox" data-ck="'+c.k+'" checked onchange="toggleCol(\''+c.k+'\')"> '+c.l+' <span onclick="removeCustomCol(\''+c.k+'\')" style="color:#c0392b;cursor:pointer;font-size:13px;margin-left:auto" title="Verwijder kolom">&times;</span></label>';
+  });
+  el.innerHTML = html;
+}
+function toggleCol(key) {
+  if (visibleColKeys.has(key)) visibleColKeys.delete(key); else visibleColKeys.add(key);
+  COLS = getCols();
+  saveColConfig();
+  vulFilters(); bouwTH(); renderT();
+}
+function addMetaCol() {
+  var hidden = ALL_COLS.filter(function(c) { return !visibleColKeys.has(c.k); });
+  if (!hidden.length) { alert('Alle metadata kolommen zijn al zichtbaar'); return; }
+  var msg = 'Kies een metadata kolom:\n\n' + hidden.map(function(c,i) { return (i+1) + '. ' + c.l; }).join('\n');
+  var keuze = prompt(msg);
+  if (!keuze) return;
+  var idx = parseInt(keuze) - 1;
+  if (idx >= 0 && idx < hidden.length) {
+    visibleColKeys.add(hidden[idx].k);
+    COLS = getCols();
+    saveColConfig();
+    vulFilters(); renderColChecks(); bouwTH(); renderT();
+  }
+}
+function addCustomCol() {
+  var naam = prompt('Naam voor de nieuwe kolom:');
+  if (!naam || !naam.trim()) return;
+  _customCounter++;
+  var key = 'custom_' + _customCounter + '_' + Date.now();
+  customCols.push({k:key, l:naam.trim(), w:'8%', custom:true});
+  visibleColKeys.add(key);
+  COLS = getCols();
+  saveColConfig();
+  renderColChecks(); bouwTH(); renderT();
+}
+function removeCustomCol(key) {
+  if (!confirm('Kolom verwijderen? Data gaat verloren.')) return;
+  customCols = customCols.filter(function(c) { return c.k !== key; });
+  visibleColKeys.delete(key);
+  // Verwijder data
+  for (var vid in customData) { if (customData[vid]) delete customData[vid][key]; }
+  COLS = getCols();
+  saveColConfig();
+  renderColChecks(); bouwTH(); renderT();
+}
+
 function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
   var tr = document.createElement('tr');
@@ -762,15 +890,17 @@ function bouwTH() {
 
 function filt() {
   var z = document.getElementById('searchBox').value.toLowerCase();
-  var fD=document.getElementById('fDisc').value, fS=document.getElementById('fStat').value, fF=document.getElementById('fFase').value, fB=document.getElementById('fBouw').value, fBe=document.getElementById('fBedr').value;
+  // Verzamel actieve filters dynamisch
+  var activeFilters = [];
+  document.querySelectorAll('#filterRows select').forEach(function(sel) {
+    if (sel.value && sel.dataset.fk) activeFilters.push({k: sel.dataset.fk, v: sel.value});
+  });
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
-    if (fD && d.discipline!==fD) return false;
-    if (fS && d.document_status!==fS) return false;
-    if (fF && d.project_fase!==fF) return false;
-    if (fB && d.bouwdeel!==fB) return false;
-    if (fBe && d.bedrijf!==fBe) return false;
-    if (z) { var t = [d.bestandsnaam,d.document_nummer,d.titel,d.discipline,d.file_location,d.bouwdeel,d.bedrijf].join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
+    for (var i = 0; i < activeFilters.length; i++) {
+      if (d[activeFilters[i].k] !== activeFilters[i].v) return false;
+    }
+    if (z) { var parts = []; getCols().forEach(function(c) { if (d[c.k]) parts.push(d[c.k]); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
   });
   if (sortK) d.sort(function(a,b) { var va=(a[sortK]||'').toLowerCase(), vb=(b[sortK]||'').toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
@@ -844,10 +974,20 @@ function renderT() {
       }
 
       COLS.forEach(function(c) {
-        var td = document.createElement('td'), v = doc[c.k] || '';
+        var td = document.createElement('td');
+        var isCustom = c.custom || false;
+        var v = isCustom ? ((customData[doc._vid]||{})[c.k]||'') : (doc[c.k] || '');
 
-        // Edit mode: bewerkbare cellen
-        if (editMode && doc._canEdit && EDITABLE_COLS.indexOf(c.k) >= 0) {
+        // Custom kolom: altijd bewerkbaar in edit mode
+        if (editMode && isCustom) {
+          var cinp = document.createElement('input'); cinp.type = 'text'; cinp.value = v;
+          cinp.style.cssText = 'width:100%;padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif;box-sizing:border-box';
+          cinp.onchange = (function(dk,vid){ return function(e) { e.stopPropagation(); if (!customData[vid]) customData[vid]={}; customData[vid][dk]=cinp.value; saveColConfig(); cinp.style.borderColor='var(--af)'; }; })(c.k, doc._vid);
+          cinp.onclick = function(e) { e.stopPropagation(); };
+          td.appendChild(cinp);
+        }
+        // Edit mode: bewerkbare metadata cellen
+        else if (editMode && doc._canEdit && EDITABLE_COLS.indexOf(c.k) >= 0) {
           if (ENUM_VALUES[c.k]) {
             // Dropdown
             var sel = document.createElement('select');
@@ -1121,6 +1261,7 @@ async function bulkSave() {
   }
   statusEl.textContent = saved + ' bestanden opgeslagen';
   selectedDocs.clear();
+  updateSelection();
   renderT();
   setTimeout(function() { statusEl.textContent = ''; }, 3000);
 }
