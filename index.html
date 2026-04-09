@@ -112,10 +112,11 @@ input[type=file]{display:none}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .tbl-wrap{flex:1;display:flex;overflow:hidden}
 .tbl-scrl{flex:1;overflow:auto}
-table{width:100%;border-collapse:collapse;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 thead{position:sticky;top:0;z-index:10}
-thead th{background:var(--dk);color:#fff;padding:8px 8px;text-align:left;font-weight:600;font-size:11px;white-space:nowrap;cursor:pointer;user-select:none}
+thead th{background:var(--dk);color:#fff;padding:8px 8px;text-align:left;font-weight:600;font-size:11px;white-space:nowrap;cursor:pointer;user-select:none;position:relative}
 thead th:hover{background:#333}
+thead th .col-resize{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;z-index:2}
 thead th .sa{margin-left:3px;opacity:.3;font-size:8px}
 thead th.sorted .sa{opacity:1;color:var(--af)}
 tbody tr{border-bottom:1px solid #f0f0f0;transition:background .1s;cursor:pointer}
@@ -294,6 +295,8 @@ var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','disc
 var visibleColKeys = new Set(DEFAULT_VISIBLE);
 var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
 var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
+var colOrder = []; // keys in volgorde
+var colWidths = {}; // { key: 'px waarde' }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
@@ -320,6 +323,8 @@ function loadColConfig() {
     }
     if (cfg.custom && Array.isArray(cfg.custom)) customCols = cfg.custom;
     if (cfg.customData) customData = cfg.customData;
+    if (cfg.order && Array.isArray(cfg.order)) colOrder = cfg.order;
+    if (cfg.widths) colWidths = cfg.widths;
     _customCounter = customCols.length;
   } catch(e) { console.warn('[Cols] Config laden mislukt:', e); }
 }
@@ -329,14 +334,26 @@ function saveColConfig() {
       visible: Array.from(visibleColKeys),
       custom: customCols,
       customData: customData,
+      order: colOrder,
+      widths: colWidths,
       _knownKeys: ALL_COLS.map(function(c) { return c.k; }),
       _v: COL_CONFIG_VERSION
     }));
   } catch(e) { console.warn('[Cols] Config opslaan mislukt:', e); }
 }
 function getCols() {
-  var cols = ALL_COLS.filter(function(c) { return visibleColKeys.has(c.k); });
-  return cols.concat(customCols.filter(function(c) { return visibleColKeys.has(c.k); }));
+  var all = ALL_COLS.concat(customCols);
+  var cols = all.filter(function(c) { return visibleColKeys.has(c.k); });
+  if (colOrder.length) {
+    var orderMap = {};
+    colOrder.forEach(function(k,i) { orderMap[k] = i; });
+    cols.sort(function(a,b) {
+      var ia = orderMap[a.k] !== undefined ? orderMap[a.k] : 999;
+      var ib = orderMap[b.k] !== undefined ? orderMap[b.k] : 999;
+      return ia - ib;
+    });
+  }
+  return cols;
 }
 // Oud COLS alias voor compatibiliteit tijdens migratie
 var COLS = getCols();
@@ -815,7 +832,7 @@ function toonDocs() {
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
 var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','titel'];
 function getFilterableCols() {
-  return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1 && !c.custom; });
+  return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1; });
 }
 
 function vulFilters() {
@@ -823,7 +840,7 @@ function vulFilters() {
   // Verzamel unieke waarden per kolom
   var sets = {};
   filterCols.forEach(function(c) { sets[c.k] = new Set(); });
-  docs.forEach(function(d) { for (var k in sets) { if (d[k]) sets[k].add(d[k]); } });
+  docs.forEach(function(d) { for (var k in sets) { var v = docVal(d, k); if (v) sets[k].add(v); } });
 
   // Bewaar huidige filterwaarden
   var curFilters = {};
@@ -899,14 +916,27 @@ function togN(el) { el.classList.toggle('open'); var ch = el.closest('.tr-row').
 function renderColChecks() {
   var el = document.getElementById('colChecks');
   if (!el) return;
+  var allCols = ALL_COLS.concat(customCols);
+  // Sorteer op opgeslagen volgorde
+  var orderMap = {};
+  colOrder.forEach(function(k,i) { orderMap[k] = i; });
+  allCols.sort(function(a,b) {
+    var ia = orderMap[a.k] !== undefined ? orderMap[a.k] : 999;
+    var ib = orderMap[b.k] !== undefined ? orderMap[b.k] : 999;
+    return ia - ib;
+  });
   var html = '';
-  ALL_COLS.forEach(function(c) {
+  allCols.forEach(function(c,i) {
     var checked = visibleColKeys.has(c.k) ? ' checked' : '';
     var disabled = c.fixed ? ' disabled' : '';
-    html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;padding:1px 0;cursor:pointer"><input type="checkbox" data-ck="'+c.k+'"'+checked+disabled+' onchange="toggleCol(\''+c.k+'\')"> '+c.l+'</label>';
-  });
-  customCols.forEach(function(c) {
-    html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;padding:1px 0;cursor:pointer"><input type="checkbox" data-ck="'+c.k+'" checked onchange="toggleCol(\''+c.k+'\')"> '+c.l+' <span onclick="removeCustomCol(\''+c.k+'\')" style="color:#c0392b;cursor:pointer;font-size:13px;margin-left:auto" title="Verwijder kolom">&times;</span></label>';
+    var isCustom = c.custom || false;
+    html += '<div style="display:flex;align-items:center;gap:3px;padding:2px 0;font-size:11px" data-colkey="'+c.k+'">';
+    html += '<span style="display:flex;flex-direction:column;line-height:1;cursor:pointer;opacity:.4;font-size:8px;user-select:none" title="Verplaats">';
+    html += '<span onclick="moveCol(\''+c.k+'\',-1)">&#9650;</span><span onclick="moveCol(\''+c.k+'\',1)">&#9660;</span></span>';
+    html += '<input type="checkbox" data-ck="'+c.k+'"'+checked+disabled+' onchange="toggleCol(\''+c.k+'\')">';
+    html += '<span style="flex:1;cursor:pointer" onclick="this.previousElementSibling.click()">'+c.l+'</span>';
+    if (isCustom) html += '<span onclick="removeCustomCol(\''+c.k+'\')" style="color:#c0392b;cursor:pointer;font-size:13px" title="Verwijder">&times;</span>';
+    html += '</div>';
   });
   el.innerHTML = html;
 }
@@ -915,6 +945,21 @@ function toggleCol(key) {
   COLS = getCols();
   saveColConfig();
   vulFilters(); if (editMode) vulBulkFields(); bouwTH(); renderT();
+}
+function moveCol(key, dir) {
+  // Bouw huidige volgorde als die nog niet bestaat
+  if (!colOrder.length) {
+    colOrder = ALL_COLS.concat(customCols).map(function(c) { return c.k; });
+  }
+  var idx = colOrder.indexOf(key);
+  if (idx < 0) return;
+  var newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= colOrder.length) return;
+  colOrder.splice(idx, 1);
+  colOrder.splice(newIdx, 0, key);
+  COLS = getCols();
+  saveColConfig();
+  renderColChecks(); bouwTH(); renderT();
 }
 function addMetaCol() {
   var hidden = ALL_COLS.filter(function(c) { return !visibleColKeys.has(c.k); });
@@ -964,9 +1009,11 @@ function bouwTH() {
   }
   COLS.forEach(function(c) {
     var th = document.createElement('th');
-    th.innerHTML = c.l + ' <span class="sa">&#9650;</span>';
-    if (c.w) th.style.width = c.w;
-    th.onclick = function() {
+    th.innerHTML = c.l + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+c.k+'\')"></span>';
+    // Opgeslagen breedte of default
+    if (colWidths[c.k]) th.style.width = colWidths[c.k];
+    else if (c.w) th.style.width = c.w;
+    th.onclick = function(e) { if (e.target.classList.contains('col-resize')) return;
       if (sortK===c.k) sortD = sortD==='asc'?'desc':'asc'; else { sortK=c.k; sortD='asc'; }
       h.querySelectorAll('th').forEach(function(t){t.classList.remove('sorted')}); th.classList.add('sorted');
       th.querySelector('.sa').innerHTML = sortD==='asc'?'&#9650;':'&#9660;'; renderT();
@@ -974,6 +1021,38 @@ function bouwTH() {
     tr.appendChild(th);
   });
   h.appendChild(tr);
+}
+
+// === KOLOM RESIZE ===
+var _resizeCol = null, _resizeTh = null, _resizeStartX = 0, _resizeStartW = 0;
+function startResize(e, colKey) {
+  e.preventDefault(); e.stopPropagation();
+  _resizeCol = colKey;
+  _resizeTh = e.target.closest('th');
+  _resizeStartX = e.clientX;
+  _resizeStartW = _resizeTh.offsetWidth;
+  document.addEventListener('mousemove', doResize);
+  document.addEventListener('mouseup', endResize);
+}
+function doResize(e) {
+  if (!_resizeTh) return;
+  var w = Math.max(40, _resizeStartW + (e.clientX - _resizeStartX));
+  _resizeTh.style.width = w + 'px';
+}
+function endResize(e) {
+  if (_resizeTh && _resizeCol) {
+    colWidths[_resizeCol] = _resizeTh.style.width;
+    saveColConfig();
+  }
+  _resizeCol = null; _resizeTh = null;
+  document.removeEventListener('mousemove', doResize);
+  document.removeEventListener('mouseup', endResize);
+}
+
+// Helper: waarde van doc voor een kolom (metadata of custom)
+function docVal(doc, key) {
+  if (key.indexOf('custom_') === 0) return (customData[doc._vid] || {})[key] || '';
+  return doc[key] || '';
 }
 
 function resetFilters() {
@@ -998,16 +1077,16 @@ function filt() {
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
     for (var i = 0; i < activeFilters.length; i++) {
-      if (d[activeFilters[i].k] !== activeFilters[i].v) return false;
+      if (docVal(d, activeFilters[i].k) !== activeFilters[i].v) return false;
     }
     if (noMeta) {
       var heeftMeta = d.document_status || d.discipline || d.project_fase || d.document_datum;
       if (heeftMeta) return false;
     }
-    if (z) { var parts = []; getCols().forEach(function(c) { if (d[c.k]) parts.push(d[c.k]); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
+    if (z) { var parts = []; getCols().forEach(function(c) { parts.push(docVal(d, c.k)); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
   });
-  if (sortK) d.sort(function(a,b) { var va=(a[sortK]||'').toLowerCase(), vb=(b[sortK]||'').toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
+  if (sortK) d.sort(function(a,b) { var va=docVal(a,sortK).toLowerCase(), vb=docVal(b,sortK).toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
   return d;
 }
 
@@ -1022,7 +1101,7 @@ function renderT() {
   var groepVeld = document.getElementById('fGroep') ? document.getElementById('fGroep').value : 'file_location';
   var pm = {};
   if (groepVeld) {
-    filtered.forEach(function(d) { var g = d[groepVeld] || '(geen)'; if (!pm[g]) pm[g] = []; pm[g].push(d); });
+    filtered.forEach(function(d) { var g = docVal(d, groepVeld) || '(geen)'; if (!pm[g]) pm[g] = []; pm[g].push(d); });
   } else {
     pm[''] = filtered;
   }
