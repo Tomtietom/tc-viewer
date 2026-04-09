@@ -944,8 +944,12 @@ async function laadPreview(vid, naam, ext, imgExts) {
   if (!el) return;
   try {
     var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-    var url = PROXY_BASE + '/tc/' + tcRegion + '/files/' + vid + '/content';
-    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+    var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + vid + '/downloadurl', {
+      headers: { 'Authorization': 'Bearer ' + tcToken }
+    });
+    if (!dlResp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
+    var dlData = await dlResp.json();
+    var resp = await fetch(dlData.url);
     if (!resp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
     var blob = await resp.blob();
     var objUrl = URL.createObjectURL(blob);
@@ -984,10 +988,15 @@ async function downloadZIP() {
     var doc = filtered[i];
     if (!doc._vid) { failed++; continue; }
     try {
-      // Download via proxy om CORS te vermijden
+      // Stap 1: haal signed download URL op via TC API
       var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-      var url = PROXY_BASE + '/tc/' + tcRegion + '/files/' + doc._vid + '/content';
-      var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      var dlUrlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + doc._vid + '/downloadurl', {
+        headers: { 'Authorization': 'Bearer ' + tcToken }
+      });
+      if (!dlUrlResp.ok) { console.warn('[ZIP] Download URL mislukt:', doc.bestandsnaam, dlUrlResp.status); failed++; continue; }
+      var dlData = await dlUrlResp.json();
+      // Stap 2: download bestand via signed URL (geen auth nodig)
+      var resp = await fetch(dlData.url);
       if (!resp.ok) { failed++; continue; }
       var blob = await resp.blob();
       // Mapstructuur op basis van actieve groepering
