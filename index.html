@@ -937,8 +937,11 @@ async function downloadZIP() {
       var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
       if (!resp.ok) { failed++; continue; }
       var blob = await resp.blob();
-      // Gebruik mappad als folder in de ZIP
-      var path = doc.file_location ? doc.file_location + '/' + doc.bestandsnaam : doc.bestandsnaam;
+      // Mapstructuur op basis van actieve groepering
+      var groepVeld = document.getElementById('fGroep') ? document.getElementById('fGroep').value : '';
+      var folder = '';
+      if (groepVeld && doc[groepVeld]) folder = doc[groepVeld];
+      var path = folder ? folder + '/' + doc.bestandsnaam : doc.bestandsnaam;
       zip.file(path, blob);
       downloaded++;
     } catch(e) {
