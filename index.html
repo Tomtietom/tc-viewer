@@ -1719,7 +1719,7 @@ async function sendShare() {
     notify: emails.map(function(e) { return { type: 'EMAIL', id: e }; }),
     objects: _lastShareDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; })
   };
-  if (expiry) body.expiryDate = new Date(expiry).toISOString();
+  if (expiry) body.expiryDate = expiry + 'T23:59:00+0000';
 
   var btn = document.getElementById('shareSubmitBtn');
   btn.textContent = '⏳ Verzenden...'; btn.disabled = true;
