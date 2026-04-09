@@ -152,6 +152,12 @@ td a:hover{text-decoration:underline}
 .dp-row .dv{font-weight:500;text-align:right;max-width:160px;word-break:break-all}
 .dp-tc{display:block;margin:10px 16px;padding:10px;background:var(--af);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;font-family:'Poppins',sans-serif}
 .dp-tc:hover{background:var(--af2)}
+.dp-preview{padding:10px 16px;border-bottom:1px solid #f0f0f0}
+.dp-preview h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:0 0 8px;font-family:'Montserrat',sans-serif}
+.dp-preview iframe,.dp-preview img{width:100%;border-radius:6px;border:1px solid #e8e0d8;background:#f9f9f9}
+.dp-preview iframe{height:320px}
+.dp-preview img{max-height:320px;object-fit:contain}
+.dp-preview .no-prev{font-size:11px;color:#aaa;text-align:center;padding:20px 0}
 .ftr{padding:5px 20px;background:#fff;border-top:1px solid #eee;font-size:11px;color:#999;display:flex;justify-content:space-between}
 </style>
 </head>
@@ -285,6 +291,7 @@ function goTo(id) {
   document.getElementById(id).classList.add('active');
   curPage = id;
   document.getElementById('backBtn').style.display = (id==='pgLoading'||id==='pgUpload') ? 'none' : 'block';
+  document.getElementById('backBtn').innerHTML = id==='pgDocs' ? '&#9776; Dashboard' : '&#8592; Terug';
   document.getElementById('csvBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   document.getElementById('zipBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   document.getElementById('editBtn').style.display = id==='pgDocs' ? 'block' : 'none';
@@ -492,17 +499,17 @@ async function tcAutoFetchData() {
       tcStep(4, 'error', 'Metadata niet beschikbaar');
     }
 
-    // === DASHBOARD TONEN ===
-    console.log('[TC] Dashboard tonen, docs:', docs.length);
-    goTo('pgDash');
+    // === DOCUMENTENLIJST TONEN (direct, dashboard op achtergrond) ===
+    console.log('[TC] Documentenlijst tonen, docs:', docs.length);
     renderDash();
+    toonDocs();
 
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
     if (docs.length > 0) {
-      console.log('[TC] Fout maar toon dashboard met', docs.length, 'docs');
-      goTo('pgDash');
+      console.log('[TC] Fout maar toon docs met', docs.length, 'docs');
       renderDash();
+      toonDocs();
     } else {
       tcStep(1, 'error', 'Fout: ' + e.message);
       document.getElementById('tcError').style.display = '';
@@ -904,9 +911,52 @@ function toonDetail(doc) {
   var html = '<div class="dp-sec"><h4>Metadata</h4>';
   velden.forEach(function(f) { if (f[1]) { var d=f[1]; if (f[0]==='Status') d=sBdg(f[1]); html += '<div class="dp-row"><span class="dl">'+f[0]+'</span><span class="dv">'+d+'</span></div>'; } });
   html += '</div>';
-  if (pid && doc._vid) { html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam)+'" target="_blank">Open in Trimble Connect &#8599;</a>'; }
+  // Preview sectie
+  if (pid && doc._vid) {
+    var ext = (doc.bestandsnaam || '').split('.').pop().toLowerCase();
+    var EXT_IMG = ['png','jpg','jpeg','gif','bmp','webp','svg'];
+    var EXT_PDF = ['pdf'];
+    html += '<div class="dp-preview"><h4>Preview</h4><div id="dpPrev">';
+    if (EXT_PDF.indexOf(ext) >= 0 || EXT_IMG.indexOf(ext) >= 0) {
+      html += '<div class="no-prev">Laden...</div>';
+    } else if (EXT_3D.indexOf(ext) >= 0) {
+      html += '<div class="no-prev">3D bestanden: open in Trimble Connect</div>';
+    } else {
+      html += '<div class="no-prev">Geen preview beschikbaar voor .' + ext + '</div>';
+    }
+    html += '</div></div>';
+    html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
+  }
   document.getElementById('dpCnt').innerHTML = html;
+  // Laad preview async (iframe/img kan geen Authorization header sturen)
+  if (pid && doc._vid) {
+    var ext2 = (doc.bestandsnaam || '').split('.').pop().toLowerCase();
+    var EXT_IMG2 = ['png','jpg','jpeg','gif','bmp','webp','svg'];
+    if (['pdf'].indexOf(ext2) >= 0 || EXT_IMG2.indexOf(ext2) >= 0) {
+      laadPreview(doc._vid, doc.bestandsnaam, ext2, EXT_IMG2);
+    }
+  }
   renderT();
+}
+
+async function laadPreview(vid, naam, ext, imgExts) {
+  var el = document.getElementById('dpPrev');
+  if (!el) return;
+  try {
+    var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+    var url = PROXY_BASE + '/tc/' + tcRegion + '/files/' + vid + '/content';
+    var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+    if (!resp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
+    var blob = await resp.blob();
+    var objUrl = URL.createObjectURL(blob);
+    if (ext === 'pdf') {
+      el.innerHTML = '<iframe src="' + objUrl + '#toolbar=0&view=FitH"></iframe>';
+    } else {
+      el.innerHTML = '<img src="' + objUrl + '" alt="' + naam + '">';
+    }
+  } catch(e) {
+    el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>';
+  }
 }
 
 function exportCSV() {
@@ -1040,22 +1090,25 @@ async function bulkSave() {
   statusEl.textContent = 'Opslaan: 0/' + toSave.length;
 
   var libId = 'tcproject:prod:' + pid;
+  // Bouw één changeset voor alle bestanden (max 500 per batch)
+  var changeset = toSave.map(function(doc) {
+    var props = {}; props[propId] = value;
+    return { link: doc._psetLink || 'frn:tcfile:' + doc._vid, libId: libId, defId: 'tcfiles', props: props };
+  });
+  statusEl.textContent = 'Opslaan: ' + toSave.length + ' bestanden...';
   var saved = 0;
-  for (var i = 0; i < toSave.length; i++) {
-    var doc = toSave[i];
-    try {
-      var body = JSON.stringify({ defId: 'tcfiles', props: {} });
-      var props = {}; props[propId] = value;
-      body = JSON.stringify({ defId: 'tcfiles', props: props });
-      await fetch(PSET_BASE + '/libs/' + encodeURIComponent(libId) + '/psets/' + encodeURIComponent(doc._psetLink), {
-        method: 'PUT',
-        headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-        body: body
-      });
-      doc[field] = value;
-      saved++;
-      statusEl.textContent = 'Opslaan: ' + saved + '/' + toSave.length;
-    } catch(e) { console.warn('[TC] Opslaan mislukt:', doc.bestandsnaam, e.message); }
+  try {
+    var resp = await fetch(PSET_BASE + '/psets/changeset', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(changeset)
+    });
+    if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
+    toSave.forEach(function(doc) { doc[field] = value; });
+    saved = toSave.length;
+  } catch(e) {
+    console.warn('[TC] Bulk opslaan mislukt:', e.message);
+    alert('Opslaan mislukt: ' + e.message);
   }
   statusEl.textContent = saved + ' bestanden opgeslagen';
   selectedDocs.clear();
@@ -1072,11 +1125,13 @@ async function saveCell(doc, field, value) {
   var props = {}; props[propId] = value;
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
   try {
-    await fetch(PSET_BASE + '/libs/' + encodeURIComponent(libId) + '/psets/' + encodeURIComponent(link), {
-      method: 'PUT',
+    var changeset = [{ link: link, libId: libId, defId: 'tcfiles', props: props }];
+    var resp = await fetch(PSET_BASE + '/psets/changeset', {
+      method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ defId: 'tcfiles', props: props })
+      body: JSON.stringify(changeset)
     });
+    if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
   } catch(e) {
