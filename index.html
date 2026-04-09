@@ -954,7 +954,7 @@ async function laadPreview(vid, naam, ext, imgExts) {
     var blob = await resp.blob();
     var objUrl = URL.createObjectURL(blob);
     if (ext === 'pdf') {
-      el.innerHTML = '<iframe src="' + objUrl + '#toolbar=0&view=FitH"></iframe>';
+      el.innerHTML = '<a href="' + objUrl + '" target="_blank" style="display:block;padding:20px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:13px;text-decoration:none">&#128196; PDF openen</a>';
     } else {
       el.innerHTML = '<img src="' + objUrl + '" alt="' + naam + '">';
     }
