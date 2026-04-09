@@ -168,6 +168,7 @@ td a:hover{text-decoration:underline}
   <span class="info" id="hdrInfo"></span>
   <span class="spacer"></span>
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
+  <button class="back-btn" id="relBtn" onclick="toonReleases()" style="display:none">&#128230; Releases</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
   <button class="action-btn" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
   <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
@@ -200,6 +201,9 @@ td a:hover{text-decoration:underline}
 
 <!-- DASHBOARD -->
 <div class="page pg-dash" id="pgDash"><div id="dashContent"></div></div>
+
+<!-- RELEASES -->
+<div class="page pg-dash" id="pgRel"><div id="relContent"></div></div>
 
 <!-- DOCUMENTEN -->
 <div class="page page-flex pg-docs" id="pgDocs">
@@ -245,6 +249,7 @@ td a:hover{text-decoration:underline}
 let docs=[], mapS={}, pid='', actMap=null, sortK='file_location', sortD='asc', selDoc=null, curPage='pgLoading';
 let tcAPI=null, tcProject=null, tcToken='', isEmbedded=false;
 let editMode=false, selectedDocs=new Set();
+var releases=[], releaseMap={}; // releaseMap: { fileId: ['Release naam',...] }
 var PROP_MAP = {};
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
@@ -271,6 +276,7 @@ const ALL_COLS = [
   {k:'document_datum',l:'Datum',w:'7%'},
   {k:'document_status',l:'Status',w:'8%'},
   {k:'_versie',l:'Versie',w:'4%'},
+  {k:'_releases',l:'Release',w:'8%'},
   {k:'_created',l:'Toegevoegd',w:'7%'},
   {k:'document_soort',l:'Document soort',w:'8%'},
   {k:'tags',l:'Tags',w:'8%'},
@@ -279,7 +285,7 @@ const ALL_COLS = [
   {k:'controlestatus',l:'Controlestatus',w:'8%'},
   {k:'controleverzoek',l:'Controleverzoek',w:'8%'},
 ];
-var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_created'];
+var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_releases','_created'];
 var visibleColKeys = new Set(DEFAULT_VISIBLE);
 var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
 var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
@@ -316,13 +322,15 @@ var COLS = getCols();
 const TCM = {'File location':'file_location','Bestandsnaam':'bestandsnaam','Document nummer':'document_nummer','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Document status':'document_status','Bedrijf':'bedrijf','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Contract status':'contract_status','Controlestatus (door controlerende partij)':'controlestatus','Controleverzoek':'controleverzoek','Discipline':'discipline','Document aanmaak datum':'document_aanmaak_datum','Document soort':'document_soort','IFC timestamp':'ifc_timestamp','Tags':'tags','Titel':'titel'};
 
 // === NAVIGATION ===
-const pages = ['pgLoading','pgUpload','pgDash','pgDocs'];
+const pages = ['pgLoading','pgUpload','pgDash','pgRel','pgDocs'];
 function goTo(id) {
   pages.forEach(p => document.getElementById(p).classList.remove('active'));
   document.getElementById(id).classList.add('active');
   curPage = id;
-  document.getElementById('backBtn').style.display = (id==='pgLoading'||id==='pgUpload') ? 'none' : 'block';
+  var isStart = (id==='pgLoading'||id==='pgUpload');
+  document.getElementById('backBtn').style.display = isStart ? 'none' : 'block';
   document.getElementById('backBtn').innerHTML = id==='pgDocs' ? '&#9776; Dashboard' : '&#8592; Terug';
+  document.getElementById('relBtn').style.display = (id==='pgDocs'||id==='pgDash') ? 'block' : 'none';
   document.getElementById('csvBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   document.getElementById('zipBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   document.getElementById('editBtn').style.display = id==='pgDocs' ? 'block' : 'none';
@@ -437,6 +445,31 @@ function tcShowProgress(pct) {
   document.getElementById('tcProgressFill').style.width = pct + '%';
 }
 
+async function fetchReleases() {
+  console.log('[TC] Releases ophalen...');
+  var relList = await tcFetch('/releases?projectId=' + pid);
+  var relArr = Array.isArray(relList) ? relList : (relList.items || []);
+  releases = [];
+  releaseMap = {};
+  for (var i = 0; i < relArr.length; i++) {
+    var rel = relArr[i];
+    var relFiles = [];
+    try {
+      var fResp = await tcFetch('/releases/' + rel.id + '/files');
+      relFiles = Array.isArray(fResp) ? fResp : (fResp.items || []);
+    } catch(e) { console.warn('[TC] Release files mislukt:', rel.name, e.message); }
+    releases.push({ id: rel.id, name: rel.name, status: rel.status, filesCount: rel.filesCount || relFiles.length, dueDate: rel.dueDate, createdOn: rel.createdOn, notes: rel.notes, files: relFiles });
+    relFiles.forEach(function(f) {
+      var fid = f.id || '';
+      if (!releaseMap[fid]) releaseMap[fid] = [];
+      releaseMap[fid].push(rel.name);
+    });
+  }
+  // Vul _releases op docs
+  docs.forEach(function(d) { d._releases = (releaseMap[d._vid] || []).join(', '); });
+  console.log('[TC] Releases:', releases.length, '| Bestanden met release:', Object.keys(releaseMap).length);
+}
+
 function vulDocs(files) {
   docs = files.map(function(b) {
     return {
@@ -529,6 +562,9 @@ async function tcAutoFetchData() {
       console.warn('[TC] Metadata mislukt:', e.message);
       tcStep(4, 'error', 'Metadata niet beschikbaar');
     }
+
+    // === RELEASES OPHALEN ===
+    try { await fetchReleases(); } catch(e) { console.warn('[TC] Releases mislukt:', e.message); }
 
     // === DOCUMENTENLIJST TONEN (direct, dashboard op achtergrond) ===
     console.log('[TC] Documentenlijst tonen, docs:', docs.length);
@@ -702,8 +738,9 @@ function renderDash() {
     '<div class="dcard"><h3>Verplichte metadata</h3>' + veldHTML + '</div>' +
     '<div class="dcard"><h3>Discipline</h3>' + diSorted.map(function(e){return '<div class="bar-r" style="cursor:pointer" onclick="filterEnToon(\'discipline\',\''+e[0]+'\')"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxDi*100+'%;background:var(--af)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
     '<div class="dcard"><h3>Fase</h3>' + faSorted.map(function(e){return '<div class="bar-r" style="cursor:pointer" onclick="filterEnToon(\'project_fase\',\''+e[0]+'\')"><span class="bar-l" title="'+e[0]+'">'+e[0]+'</span><div class="bar-t"><div class="bar-f" style="width:'+e[1]/maxFa*100+'%;background:var(--info)"></div></div><span class="bar-c">'+e[1]+'</span></div>';}).join('') + '</div>' +
+    (releases.length ? '<div class="dcard" style="cursor:pointer" onclick="toonReleases()"><h3>Releases</h3>' + releases.map(function(r) { var st = r.status==='SENT'?'b-def':'b-con'; var lb = r.status==='SENT'?'Verzonden':'Open'; return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px"><span style="font-weight:500">' + r.name + '</span><span><span class="bdg '+st+'">'+lb+'</span> <span style="color:#888;margin-left:4px">'+r.filesCount+'</span></span></div>'; }).join('') + '</div>' : '') +
     '</div>' +
-    '<div style="display:flex;gap:12px;margin-top:8px"><button class="nav-btn" onclick="toonDocs()">Bekijk documentenlijst &#8594;</button><button class="nav-btn sec" onclick="exportCSV()">&#11015; CSV</button></div>';
+    '<div style="display:flex;gap:12px;margin-top:8px"><button class="nav-btn" onclick="toonDocs()">Bekijk documentenlijst &#8594;</button><button class="nav-btn sec" onclick="toonReleases()">&#128230; Releases</button><button class="nav-btn sec" onclick="exportCSV()">&#11015; CSV</button></div>';
 }
 
 // Filter vanuit dashboard en spring naar docs
@@ -724,7 +761,7 @@ function toonDocs() {
 }
 
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
-var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','titel'];
+var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','titel'];
 function getFilterableCols() {
   return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1 && !c.custom; });
 }
@@ -1093,6 +1130,134 @@ async function laadPreview(vid, naam, ext, imgExts) {
   } catch(e) {
     el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>';
   }
+}
+
+// === RELEASES PAGINA ===
+function toonReleases() {
+  goTo('pgRel');
+  renderReleases();
+}
+
+function renderReleases() {
+  var el = document.getElementById('relContent');
+  if (!releases.length) {
+    el.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#888"><div style="font-size:48px;margin-bottom:12px">&#128230;</div><h2 style="font-family:Montserrat,sans-serif;font-size:18px;color:#222;margin-bottom:8px">Geen releases</h2><p style="font-size:13px">Dit project heeft nog geen releases in Trimble Connect.</p></div>';
+    return;
+  }
+  var html = '<div style="padding:24px"><h2 style="font-family:Montserrat,sans-serif;font-size:18px;margin-bottom:16px">Releases <span style="font-size:13px;color:#888;font-weight:400">(' + releases.length + ')</span></h2>';
+  html += '<div class="dash-grid">';
+  releases.forEach(function(rel) {
+    var stClass = rel.status === 'SENT' ? 'b-def' : 'b-con';
+    var stLabel = rel.status === 'SENT' ? 'Verzonden' : 'Open';
+    var dt = rel.dueDate ? fmtDate(rel.dueDate) : '';
+    html += '<div class="dcard" style="cursor:pointer" onclick="toonReleaseDetail(\'' + rel.id + '\')">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">' +
+      '<h3 style="font-size:14px;font-weight:700;font-family:Montserrat,sans-serif;margin:0">' + rel.name + '</h3>' +
+      '<span class="bdg ' + stClass + '">' + stLabel + '</span></div>' +
+      '<div style="font-size:12px;color:#888">' + rel.filesCount + ' bestanden' + (dt ? ' &middot; ' + dt : '') + '</div>' +
+      (rel.notes ? '<div style="font-size:11px;color:#aaa;margin-top:4px">' + rel.notes + '</div>' : '') +
+      '</div>';
+  });
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function toonReleaseDetail(relId) {
+  var rel = releases.find(function(r) { return r.id === relId; });
+  if (!rel) return;
+  var el = document.getElementById('relContent');
+  var stClass = rel.status === 'SENT' ? 'b-def' : 'b-con';
+  var stLabel = rel.status === 'SENT' ? 'Verzonden' : 'Open';
+  var dt = rel.dueDate ? fmtDate(rel.dueDate) : '';
+
+  var html = '<div style="padding:24px">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">';
+  html += '<button onclick="renderReleases()" style="padding:4px 12px;background:rgba(0,0,0,.05);border:none;border-radius:6px;cursor:pointer;font-family:Poppins,sans-serif;font-size:12px">&#8592; Alle releases</button>';
+  html += '<h2 style="font-family:Montserrat,sans-serif;font-size:18px;margin:0">' + rel.name + '</h2>';
+  html += '<span class="bdg ' + stClass + '">' + stLabel + '</span>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:12px;margin-bottom:16px;font-size:12px;color:#888">';
+  html += '<span>' + rel.filesCount + ' bestanden</span>';
+  if (dt) html += '<span>Deadline: ' + dt + '</span>';
+  if (rel.notes) html += '<span>' + rel.notes + '</span>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-bottom:16px">';
+  html += '<button class="nav-btn" style="width:auto;padding:8px 20px;font-size:12px" onclick="downloadRelease(\'' + rel.id + '\')">&#128230; Download ZIP + CSV</button>';
+  html += '<button class="nav-btn sec" style="width:auto;padding:8px 20px;font-size:12px" onclick="exportReleaseCSV(\'' + rel.id + '\')">&#11015; Alleen CSV</button>';
+  html += '</div>';
+
+  // Bestanden tabel
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.04)">';
+  html += '<thead><tr style="background:var(--gr);text-align:left"><th style="padding:8px 12px">Bestandsnaam</th><th style="padding:8px">Revisie</th><th style="padding:8px">Gewijzigd</th></tr></thead><tbody>';
+  rel.files.forEach(function(f) {
+    // Zoek doc in hoofdlijst voor extra metadata
+    var doc = docs.find(function(d) { return d._vid === f.id; });
+    var naam = f.name || (doc ? doc.bestandsnaam : '');
+    var rev = f.revision || '';
+    var mod = f.modifiedOn ? fmtDate(f.modifiedOn) : '';
+    html += '<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:8px 12px">';
+    if (pid && f.id) {
+      html += '<a href="' + tcFileUrl(f.id, naam) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
+    } else { html += naam; }
+    html += '</td><td style="padding:8px">' + rev + '</td><td style="padding:8px;color:#888">' + mod + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+function exportReleaseCSV(relId) {
+  var rel = releases.find(function(r) { return r.id === relId; });
+  if (!rel) return;
+  var rows = [['Bestandsnaam','Revisie','Gewijzigd','Release','Status'].join(';')];
+  rel.files.forEach(function(f) {
+    var naam = f.name || '';
+    var rev = f.revision || '';
+    var mod = f.modifiedOn ? fmtDate(f.modifiedOn) : '';
+    rows.push(['"'+naam+'"',rev,'"'+mod+'"','"'+rel.name+'"','"'+rel.status+'"'].join(';'));
+  });
+  var blob = new Blob(['\ufeff' + rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'release_' + rel.name.replace(/[^a-zA-Z0-9-_ ]/g,'') + '.csv'; a.click();
+}
+
+async function downloadRelease(relId) {
+  var rel = releases.find(function(r) { return r.id === relId; });
+  if (!rel || !rel.files.length) { alert('Geen bestanden in deze release'); return; }
+  if (!confirm('Download ' + rel.files.length + ' bestanden uit "' + rel.name + '" als ZIP?')) return;
+
+  var btn = event.target; btn.textContent = '⏳ 0/' + rel.files.length; btn.disabled = true;
+  var zip = new JSZip();
+  var downloaded = 0, failed = 0;
+
+  for (var i = 0; i < rel.files.length; i++) {
+    var f = rel.files[i];
+    if (!f.id) { failed++; continue; }
+    try {
+      var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+      var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + f.id + '/downloadurl', { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      if (!dlResp.ok) { failed++; continue; }
+      var dlData = await dlResp.json();
+      var resp = await fetch(dlData.url);
+      if (!resp.ok) { failed++; continue; }
+      zip.file(f.name || ('file_' + i), await resp.blob());
+      downloaded++;
+    } catch(e) { failed++; }
+    btn.textContent = '⏳ ' + (downloaded + failed) + '/' + rel.files.length;
+  }
+
+  // CSV toevoegen aan ZIP
+  var csvRows = [['Bestandsnaam','Revisie','Gewijzigd'].join(';')];
+  rel.files.forEach(function(f) { csvRows.push(['"'+(f.name||'')+'"',f.revision||'','"'+fmtDate(f.modifiedOn||'')+'"'].join(';')); });
+  zip.file('_documentenlijst_' + rel.name.replace(/[^a-zA-Z0-9-_ ]/g,'') + '.csv', '\ufeff' + csvRows.join('\n'));
+
+  btn.textContent = '⏳ ZIP maken...';
+  try {
+    var content = await zip.generateAsync({ type: 'blob' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(content);
+    a.download = 'release_' + rel.name.replace(/[^a-zA-Z0-9-_ ]/g,'') + '_' + downloaded + '_bestanden.zip'; a.click();
+  } catch(e) { alert('ZIP aanmaken mislukt: ' + e.message); }
+
+  btn.textContent = '📦 Download ZIP + CSV'; btn.disabled = false;
+  if (failed > 0) alert(downloaded + ' gedownload, ' + failed + ' mislukt.');
 }
 
 function exportCSV() {
