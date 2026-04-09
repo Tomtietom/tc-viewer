@@ -272,17 +272,22 @@ td a:hover{text-decoration:underline}
     <div id="shareForm">
       <h3>&#128228; Documenten delen</h3>
       <div class="file-list" id="shareFileList"></div>
-      <label>Email ontvangers (komma-gescheiden)</label>
-      <input type="text" id="shareEmails" placeholder="naam@bedrijf.nl, naam2@bedrijf.nl">
+      <label>Email ontvangers (optioneel, komma-gescheiden)</label>
+      <input type="text" id="shareEmails" placeholder="naam@bedrijf.nl — leeg laten = alleen link maken">
       <label>Bericht</label>
-      <textarea id="shareMsg" placeholder="Optioneel bericht voor de ontvangers..." maxlength="1024"></textarea>
+      <textarea id="shareMsg" placeholder="Optioneel bericht..." maxlength="1024"></textarea>
       <div style="display:flex;gap:12px">
         <div style="flex:1"><label>Toestemming</label><select id="sharePerm"><option value="VIEW">Bekijken</option><option value="DOWNLOAD">Downloaden</option></select></div>
-        <div style="flex:1"><label>Vervaldatum (optioneel)</label><input type="date" id="shareExpiry"></div>
+        <div style="flex:1"><label>Vervaldatum</label><input type="date" id="shareExpiry"></div>
       </div>
       <div class="btn-row">
         <button class="btn-secondary" onclick="closeShareDialog()">Annuleren</button>
-        <button class="btn-primary" id="shareSubmitBtn" onclick="sendShare()">&#128228; Verzenden</button>
+        <button class="btn-primary" id="shareSubmitBtn" onclick="sendShare('email')">&#9993; Via eigen email</button>
+        <button class="btn-primary" id="shareTcBtn" onclick="sendShare('tc')" style="background:var(--info)">&#128228; Via Trimble Connect</button>
+      </div>
+      <div style="font-size:10px;color:#888;margin-top:8px;text-align:center">
+        <b>Via eigen email</b>: maakt link aan en opent je mailprogramma<br>
+        <b>Via Trimble Connect</b>: TC stuurt email naar de ontvangers
       </div>
     </div>
     <div id="shareSuccess" style="display:none">
@@ -1697,15 +1702,19 @@ function closeShareDialog() {
   document.getElementById('shareModal').classList.remove('vis');
 }
 
-async function sendShare() {
+async function sendShare(method) {
   var emails = document.getElementById('shareEmails').value.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e && e.indexOf('@') > 0; });
   var msg = document.getElementById('shareMsg').value;
   var perm = document.getElementById('sharePerm').value;
   var expiry = document.getElementById('shareExpiry').value;
 
-  if (!emails.length) { alert('Vul minstens één geldig email adres in'); return; }
+  // TC methode vereist emails
+  if (method === 'tc' && !emails.length) { alert('Vul minstens één email adres in voor TC verzending'); return; }
 
-  // Bouw doclijst samenvatting voor in het bericht
+  // Waarschuwing: openbaar delen
+  if (!confirm('⚠️ LET OP: OPENBAAR DELEN\n\nDeze ' + _lastShareDocs.length + ' bestanden worden publiek beschikbaar via een link.\nIedereen met de link kan de bestanden ' + (perm === 'DOWNLOAD' ? 'downloaden' : 'bekijken') + '.\n\nVervaldatum: ' + (expiry || 'geen') + '\n\nDeze actie wordt gelogd in het TC activiteitenfeed.\n\nDoorgaan?')) return;
+
+  // Bouw doclijst samenvatting
   var docSummary = '\n\n--- Documentenlijst ---\n' + _lastShareDocs.map(function(d) {
     return d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
   }).join('\n');
@@ -1716,9 +1725,12 @@ async function sendShare() {
     projectId: pid,
     permission: perm,
     message: fullMsg,
-    notify: emails.map(function(e) { return { type: 'EMAIL', id: e }; }),
     objects: _lastShareDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; })
   };
+  // Alleen TC notify als method=tc (voorkomt dubbele mail)
+  if (method === 'tc' && emails.length) {
+    body.notify = emails.map(function(e) { return { type: 'EMAIL', id: e }; });
+  }
   if (expiry) body.expiryDate = expiry + 'T23:59:00+0000';
 
   var btn = document.getElementById('shareSubmitBtn');
@@ -1747,10 +1759,18 @@ async function sendShare() {
     });
     localStorage.setItem('doclist-shared-' + pid, JSON.stringify(shareLog));
 
+    // Bij eigen email: open direct mailprogramma
+    if (method === 'email') {
+      openShareInMail();
+    }
+
     // Toon success
     document.getElementById('shareForm').style.display = 'none';
     document.getElementById('shareSuccess').style.display = '';
-    document.getElementById('shareSuccessMsg').textContent = _lastShareDocs.length + ' bestanden gedeeld met ' + emails.join(', ');
+    var successMsg = method === 'tc'
+      ? _lastShareDocs.length + ' bestanden gedeeld via TC met ' + emails.join(', ')
+      : _lastShareDocs.length + ' bestanden — link aangemaakt, email geopend';
+    document.getElementById('shareSuccessMsg').textContent = successMsg;
     document.getElementById('shareLink').textContent = _lastShareUrl || 'Link beschikbaar in Trimble Connect';
 
     console.log('[Share] Succesvol:', result);
@@ -1776,12 +1796,13 @@ function copyShareLink() {
 
 function openShareInMail() {
   var emails = document.getElementById('shareEmails').value || '';
+  var userMsg = document.getElementById('shareMsg').value || '';
   var projNaam = (tcProject && tcProject.name) ? tcProject.name : 'Project';
   var subject = 'Documenten gedeeld: ' + projNaam;
   var docList = _lastShareDocs.map(function(d) {
     return '- ' + d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
   }).join('\n');
-  var body = 'Hierbij deel ik de volgende documenten uit ' + projNaam + ':\n\n' + docList + '\n\nLink: ' + (_lastShareUrl || '(zie Trimble Connect)') + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
+  var body = (userMsg ? userMsg + '\n\n' : '') + 'Documenten uit ' + projNaam + ':\n\n' + docList + '\n\nOpen de bestanden via deze link:\n' + (_lastShareUrl || '(link niet beschikbaar)') + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
   var mailto = 'mailto:' + encodeURIComponent(emails) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
   window.open(mailto, '_blank');
 }
