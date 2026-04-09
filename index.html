@@ -6,6 +6,7 @@
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Poppins',-apple-system,sans-serif;background:#f9f9f9;color:#222;min-height:100vh}
@@ -162,6 +163,7 @@ td a:hover{text-decoration:underline}
   <span class="spacer"></span>
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
+  <button class="action-btn" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
   <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
 </div>
 
@@ -200,6 +202,7 @@ td a:hover{text-decoration:underline}
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div class="frow"><select id="fDisc"><option value="">Discipline</option></select><select id="fStat"><option value="">Status</option></select></div>
       <div class="frow"><select id="fFase"><option value="">Fase</option></select><select id="fBouw"><option value="">Bouwdeel</option></select></div>
+      <div class="frow"><select id="fBedr"><option value="">Bedrijf</option></select></div>
       <div class="frow" style="margin-top:8px">
         <select id="fGroep" onchange="renderT()" style="flex:1;font-weight:600">
           <option value="">Geen groepering</option>
@@ -208,6 +211,7 @@ td a:hover{text-decoration:underline}
           <option value="document_status">Groepeer: Status</option>
           <option value="project_fase">Groepeer: Fase</option>
           <option value="bouwdeel">Groepeer: Bouwdeel</option>
+          <option value="bedrijf">Groepeer: Bedrijf</option>
           <option value="document_soort">Groepeer: Document soort</option>
         </select>
       </div>
@@ -226,6 +230,7 @@ td a:hover{text-decoration:underline}
         <option value="bouwdeel">Bouwdeel</option>
         <option value="document_nummer">Doc.nr</option>
         <option value="titel">Omschrijving</option>
+        <option value="bedrijf">Bedrijf</option>
       </select>
       <select id="bulkValue" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;max-width:160px"></select>
       <button onclick="bulkSave()" style="padding:3px 10px;background:var(--af);color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Toepassen</button>
@@ -261,7 +266,8 @@ const COLS = [
   {k:'document_nummer',l:'Doc.nr',w:'8%'},
   {k:'bouwdeel',l:'Bouwdeel',w:'7%'},
   {k:'titel',l:'Omschrijving',w:'15%'},
-  {k:'discipline',l:'Discipline',w:'9%'},
+  {k:'discipline',l:'Discipline',w:'8%'},
+  {k:'bedrijf',l:'Bedrijf',w:'8%'},
   {k:'project_fase',l:'Fase',w:'10%'},
   {k:'revisie',l:'Rev.',w:'4%'},
   {k:'document_datum',l:'Datum',w:'7%'},
@@ -279,6 +285,7 @@ function goTo(id) {
   curPage = id;
   document.getElementById('backBtn').style.display = (id==='pgLoading'||id==='pgUpload') ? 'none' : 'block';
   document.getElementById('csvBtn').style.display = id==='pgDocs' ? 'block' : 'none';
+  document.getElementById('zipBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   document.getElementById('editBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   if (id !== 'pgDocs' && editMode) { editMode = false; selectedDocs.clear(); }
 }
@@ -663,7 +670,7 @@ function renderDash() {
 // Filter vanuit dashboard en spring naar docs
 function filterEnToon(filterType, waarde) {
   toonDocs();
-  var filterMap = { document_status: 'fStat', discipline: 'fDisc', project_fase: 'fFase', bouwdeel: 'fBouw' };
+  var filterMap = { document_status: 'fStat', discipline: 'fDisc', project_fase: 'fFase', bouwdeel: 'fBouw', bedrijf: 'fBedr' };
   var selectId = filterMap[filterType];
   if (selectId) {
     var sel = document.getElementById(selectId);
@@ -677,15 +684,15 @@ function toonDocs() {
   if (!document.getElementById('tHead').children.length) {
     vulFilters(); bouwBoom(); bouwTH(); renderT();
     document.getElementById('searchBox').addEventListener('input', renderT);
-    ['fDisc','fStat','fFase','fBouw'].forEach(function(id) { document.getElementById(id).addEventListener('change', renderT); });
+    ['fDisc','fStat','fFase','fBouw','fBedr'].forEach(function(id) { document.getElementById(id).addEventListener('change', renderT); });
   }
 }
 
 function vulFilters() {
-  var s = {discipline:new Set(),document_status:new Set(),project_fase:new Set(),bouwdeel:new Set()};
+  var s = {discipline:new Set(),document_status:new Set(),project_fase:new Set(),bouwdeel:new Set(),bedrijf:new Set()};
   docs.forEach(function(d) { for (var k in s) { if (d[k]) s[k].add(d[k]); } });
   function fill(id, set) { var sel = document.getElementById(id); Array.from(set).sort().forEach(function(w) { var o = document.createElement('option'); o.value=w; o.textContent=w; sel.appendChild(o); }); }
-  fill('fDisc',s.discipline); fill('fStat',s.document_status); fill('fFase',s.project_fase); fill('fBouw',s.bouwdeel);
+  fill('fDisc',s.discipline); fill('fStat',s.document_status); fill('fFase',s.project_fase); fill('fBouw',s.bouwdeel); fill('fBedr',s.bedrijf);
 }
 
 function bouwBoom() {
@@ -747,14 +754,15 @@ function bouwTH() {
 
 function filt() {
   var z = document.getElementById('searchBox').value.toLowerCase();
-  var fD=document.getElementById('fDisc').value, fS=document.getElementById('fStat').value, fF=document.getElementById('fFase').value, fB=document.getElementById('fBouw').value;
+  var fD=document.getElementById('fDisc').value, fS=document.getElementById('fStat').value, fF=document.getElementById('fFase').value, fB=document.getElementById('fBouw').value, fBe=document.getElementById('fBedr').value;
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
     if (fD && d.discipline!==fD) return false;
     if (fS && d.document_status!==fS) return false;
     if (fF && d.project_fase!==fF) return false;
     if (fB && d.bouwdeel!==fB) return false;
-    if (z) { var t = [d.bestandsnaam,d.document_nummer,d.titel,d.discipline,d.file_location,d.bouwdeel].join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
+    if (fBe && d.bedrijf!==fBe) return false;
+    if (z) { var t = [d.bestandsnaam,d.document_nummer,d.titel,d.discipline,d.file_location,d.bouwdeel,d.bedrijf].join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
   });
   if (sortK) d.sort(function(a,b) { var va=(a[sortK]||'').toLowerCase(), vb=(b[sortK]||'').toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
@@ -908,13 +916,63 @@ function exportCSV() {
   var a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='documentenlijst.csv'; a.click();
 }
 
+// === ZIP DOWNLOAD ===
+async function downloadZIP() {
+  var filtered = filt();
+  if (!filtered.length) { alert('Geen documenten om te downloaden'); return; }
+  if (!confirm('Download ' + filtered.length + ' bestanden als ZIP?\n\nDit kan even duren bij grote bestanden.')) return;
+
+  var zipBtn = document.getElementById('zipBtn');
+  zipBtn.textContent = '⏳ 0/' + filtered.length;
+  zipBtn.disabled = true;
+
+  var zip = new JSZip();
+  var downloaded = 0, failed = 0;
+
+  for (var i = 0; i < filtered.length; i++) {
+    var doc = filtered[i];
+    if (!doc._vid) { failed++; continue; }
+    try {
+      var url = TC_BASE + '/files/' + doc._vid + '/content';
+      var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      if (!resp.ok) { failed++; continue; }
+      var blob = await resp.blob();
+      // Gebruik mappad als folder in de ZIP
+      var path = doc.file_location ? doc.file_location + '/' + doc.bestandsnaam : doc.bestandsnaam;
+      zip.file(path, blob);
+      downloaded++;
+    } catch(e) {
+      console.warn('[ZIP] Download mislukt:', doc.bestandsnaam, e.message);
+      failed++;
+    }
+    zipBtn.textContent = '⏳ ' + (downloaded + failed) + '/' + filtered.length;
+  }
+
+  // Genereer en download ZIP
+  zipBtn.textContent = '⏳ ZIP maken...';
+  try {
+    var content = await zip.generateAsync({ type: 'blob' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    var projNaam = (tcProject && tcProject.name) ? tcProject.name.replace(/[^a-zA-Z0-9-_ ]/g, '') : 'documenten';
+    a.download = projNaam + '_' + downloaded + '_bestanden.zip';
+    a.click();
+  } catch(e) {
+    alert('ZIP aanmaken mislukt: ' + e.message);
+  }
+
+  zipBtn.textContent = '📦 ZIP';
+  zipBtn.disabled = false;
+  if (failed > 0) alert(downloaded + ' bestanden gedownload, ' + failed + ' mislukt.');
+}
+
 // === EDIT MODE ===
 var ENUM_VALUES = {
   document_status: ['--','Concept','Voorlopig','Definitief','Vervallen','Voor ontwerp','Voor uitvoering','As built','Intern'],
   discipline: ['--','Opdrachtgever','Architect','Constructeur','Installateur','Adviseur','Hoofdaannemer','Onderaannemer','Leverancier','Overheid','Nuts','Directievoering','Overig'],
   project_fase: ['--','Initiatief','Project definitie','Structuur ontwerp','Voorlopig ontwerp','Definitief ontwerp','Technisch ontwerp','Prijs en contractvorming','Uitvoeringsgereed ontwerp','Realisatie','Gebruik en exploitatie','Project (alle fasen)'],
 };
-var EDITABLE_COLS = ['document_status','discipline','project_fase','bouwdeel','document_nummer','titel','document_datum','revisie'];
+var EDITABLE_COLS = ['document_status','discipline','project_fase','bouwdeel','document_nummer','titel','document_datum','revisie','bedrijf'];
 
 function toggleEditMode() {
   if (!editMode) {
