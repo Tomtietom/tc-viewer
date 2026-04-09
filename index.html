@@ -293,7 +293,8 @@ td a:hover{text-decoration:underline}
       </div>
       <div class="link-box" id="shareLink"></div>
       <div class="btn-row">
-        <button class="btn-secondary" onclick="copyShareLink()">&#128203; Kopieer link + doclijst</button>
+        <button class="btn-secondary" onclick="copyShareLink()">&#128203; Kopieer</button>
+        <button class="btn-secondary" onclick="openShareInMail()">&#9993; Open in email</button>
         <button class="btn-primary" onclick="closeShareDialog()">Sluiten</button>
       </div>
     </div>
@@ -333,6 +334,7 @@ const ALL_COLS = [
   {k:'document_status',l:'Status',w:'8%'},
   {k:'_versie',l:'Versie',w:'4%'},
   {k:'_releases',l:'Release',w:'8%'},
+  {k:'_gedeeld',l:'Gedeeld',w:'6%'},
   {k:'_created',l:'Toegevoegd',w:'7%'},
   {k:'document_soort',l:'Document soort',w:'8%'},
   {k:'tags',l:'Tags',w:'8%'},
@@ -341,7 +343,7 @@ const ALL_COLS = [
   {k:'controlestatus',l:'Controlestatus',w:'8%'},
   {k:'controleverzoek',l:'Controleverzoek',w:'8%'},
 ];
-var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_releases','_created'];
+var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_releases','_gedeeld','_created'];
 var visibleColKeys = new Set(DEFAULT_VISIBLE);
 var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
 var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
@@ -350,7 +352,7 @@ var colWidths = {}; // { key: 'px waarde' }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
-var COL_CONFIG_VERSION = 3; // Verhoog bij structurele wijzigingen
+var COL_CONFIG_VERSION = 4; // Verhoog bij structurele wijzigingen
 function loadColConfig() {
   try {
     var raw = localStorage.getItem(getColConfigKey());
@@ -874,13 +876,18 @@ function toonDocs() {
   goTo('pgDocs');
   if (!document.getElementById('tHead').children.length) {
     loadColConfig(); COLS = getCols();
+    // Laad gedeeld-markering uit localStorage
+    try {
+      var shareLog = JSON.parse(localStorage.getItem('doclist-shared-' + pid) || '{}');
+      docs.forEach(function(d) { if (shareLog[d._vid]) d._gedeeld = shareLog[d._vid].date.split('T')[0]; });
+    } catch(e) {}
     vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
     document.getElementById('searchBox').addEventListener('input', renderT);
   }
 }
 
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
-var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','titel'];
+var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','_gedeeld','titel'];
 function getFilterableCols() {
   return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1; });
 }
@@ -1050,13 +1057,11 @@ function removeCustomCol(key) {
 function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
   var tr = document.createElement('tr');
-  // Checkbox kolom in edit mode
-  if (editMode) {
-    var thCb = document.createElement('th'); thCb.style.width = '30px';
-    var cb = document.createElement('input'); cb.type = 'checkbox';
-    cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (d._canEdit) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); } }); updateSelection(); /* update checkboxes without full re-render */ document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
-    thCb.appendChild(cb); tr.appendChild(thCb);
-  }
+  // Checkbox kolom (altijd zichtbaar voor selectie/delen)
+  var thCb = document.createElement('th'); thCb.style.width = '30px';
+  var cb = document.createElement('input'); cb.type = 'checkbox';
+  cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); }); updateSelection(); document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
+  thCb.appendChild(cb); tr.appendChild(thCb);
   COLS.forEach(function(c) {
     var th = document.createElement('th');
     th.innerHTML = c.l + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+c.k+'\')"></span>';
@@ -1173,11 +1178,11 @@ function renderT() {
       if (groepVeld === 'file_location') {
         var dl = mp.split('/').filter(function(d){return d;}), niv = Math.min(dl.length, 3);
         mtr.className = 'mn' + niv;
-        var td = document.createElement('td'); td.colSpan = COLS.length + (editMode ? 1 : 0);
+        var td = document.createElement('td'); td.colSpan = COLS.length + 1;
         td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + (niv===1?'&#128193;':'&#128194;') + ' ' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
       } else {
         mtr.className = 'mn-meta';
-        var td = document.createElement('td'); td.colSpan = COLS.length + (editMode ? 1 : 0);
+        var td = document.createElement('td'); td.colSpan = COLS.length + 1;
         if (groepVeld === 'document_status') {
           td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + sBdg(mp) + ' <span style="opacity:.5;font-weight:400;margin-left:8px">' + pm[mp].length + ' documenten</span>';
         } else {
@@ -1189,21 +1194,16 @@ function renderT() {
     pm[mp].forEach(function(doc) {
       var tr = document.createElement('tr');
       tr.className = gid;
-      tr.onclick = function() { if (!editMode) toonDetail(doc); };
+      tr.onclick = function(e) { if (e.target.tagName === 'INPUT') return; if (!editMode) toonDetail(doc); };
       if (selDoc===doc) tr.classList.add('sel');
 
-      // Checkbox in edit mode
-      if (editMode) {
-        var tdCb = document.createElement('td'); tdCb.style.width = '30px'; tdCb.style.textAlign = 'center';
-        if (doc._canEdit) {
-          var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
-          cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
-          cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
-          tdCb.appendChild(cb);
-        } else {
-          tdCb.innerHTML = '<span style="opacity:.3" title="Geen schrijfrechten">&#128274;</span>';
-        }
-        tr.appendChild(tdCb);
+      // Checkbox (altijd zichtbaar)
+      var tdCb = document.createElement('td'); tdCb.style.width = '30px'; tdCb.style.textAlign = 'center';
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
+      cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
+      cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
+      tdCb.appendChild(cb);
+      tr.appendChild(tdCb);
       }
 
       COLS.forEach(function(c) {
@@ -1574,9 +1574,9 @@ function updateSelection() {
   document.getElementById('editSelCount').textContent = cnt + ' geselecteerd';
   bar.style.display = (editMode && cnt > 0) ? 'flex' : (editMode ? 'flex' : 'none');
   if (cnt === 0) document.getElementById('editSelCount').textContent = 'Selecteer bestanden om bulk te bewerken';
-  // Delen knop tonen als bestanden geselecteerd
+  // Delen knop: altijd zichtbaar als bestanden geselecteerd (ongeacht edit mode)
   var shareBtn = document.getElementById('shareBtn');
-  if (shareBtn) shareBtn.style.display = (editMode && cnt > 0) ? 'block' : 'none';
+  if (shareBtn) shareBtn.style.display = cnt > 0 ? 'block' : 'none';
 }
 
 // Bulk field change → populate values dropdown
@@ -1687,7 +1687,8 @@ function openShareDialog() {
   document.getElementById('shareEmails').value = '';
   document.getElementById('shareMsg').value = '';
   document.getElementById('sharePerm').value = 'VIEW';
-  document.getElementById('shareExpiry').value = '';
+  var defExpiry = new Date(); defExpiry.setDate(defExpiry.getDate() + 14);
+  document.getElementById('shareExpiry').value = defExpiry.toISOString().split('T')[0];
   document.getElementById('shareForm').style.display = '';
   document.getElementById('shareSuccess').style.display = 'none';
   document.getElementById('shareModal').classList.add('vis');
@@ -1738,6 +1739,15 @@ async function sendShare() {
     var shareUrls = (result.objects || []).map(function(o) { return o.url || ''; }).filter(function(u) { return u; });
     _lastShareUrl = shareUrls.length ? 'https://web.connect.trimble.com' + shareUrls[0] : (result.url || '');
 
+    // Markeer bestanden als gedeeld (localStorage)
+    var shareLog = JSON.parse(localStorage.getItem('doclist-shared-' + pid) || '{}');
+    var now = new Date().toISOString();
+    _lastShareDocs.forEach(function(d) {
+      shareLog[d._vid] = { date: now, emails: emails.join(', '), url: _lastShareUrl };
+      d._gedeeld = now.split('T')[0];
+    });
+    localStorage.setItem('doclist-shared-' + pid, JSON.stringify(shareLog));
+
     // Toon success
     document.getElementById('shareForm').style.display = 'none';
     document.getElementById('shareSuccess').style.display = '';
@@ -1763,6 +1773,18 @@ function copyShareLink() {
     var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
     alert('Link + doclijst gekopieerd naar klembord!');
   }
+}
+
+function openShareInMail() {
+  var emails = document.getElementById('shareEmails').value || '';
+  var projNaam = (tcProject && tcProject.name) ? tcProject.name : 'Project';
+  var subject = 'Documenten gedeeld: ' + projNaam;
+  var docList = _lastShareDocs.map(function(d) {
+    return '- ' + d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
+  }).join('\n');
+  var body = 'Hierbij deel ik de volgende documenten uit ' + projNaam + ':\n\n' + docList + '\n\nLink: ' + (_lastShareUrl || '(zie Trimble Connect)') + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
+  var mailto = 'mailto:' + encodeURIComponent(emails) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  window.open(mailto, '_blank');
 }
 
 // === START ===
