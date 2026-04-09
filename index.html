@@ -211,7 +211,12 @@ td a:hover{text-decoration:underline}
     <div class="sb-sec">
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div id="filterRows"></div>
-      <div class="frow" style="margin-top:8px">
+      <div class="frow" style="margin-top:6px">
+        <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer;color:#888"><input type="checkbox" id="fNoMeta" onchange="renderT()"> Zonder metadata</label>
+        <span style="flex:1"></span>
+        <button onclick="resetFilters()" style="font-size:10px;padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:Poppins,sans-serif;color:#888">Reset filters</button>
+      </div>
+      <div class="frow" style="margin-top:4px">
         <select id="fGroep" onchange="renderT()" style="flex:1;font-weight:600"></select>
       </div>
     </div>
@@ -642,25 +647,45 @@ async function tcGetMetadata(projectId, bestanden) {
   var libId = 'tcproject:prod:' + projectId;
   console.log('[TC] PSet lib:', libId);
 
-  // Property ID → veldnaam mapping (VW BVGO schema)
-  PROP_MAP = {
-    '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
-    '3d82d630-c1a6-11ed-a3ee-5d6c31021d9f': 'document_aanmaak_datum',
-    'a442e490-d47a-11ee-8133-af31c2576a74': 'revisie',
-    'cbc46730-41af-11ea-9125-af458cfb61c4': 'document_status',
-    'c83d7d90-055a-11ea-9ee0-4f66993176e1': 'project_fase',
-    '202e0b40-055c-11ea-9ee0-4f66993176e1': 'discipline',
-    '27e4c520-6f6b-11eb-84a6-c3eae4856606': 'document_nummer',
-    '502b6300-b19b-11eb-a211-dbedff274ddf': 'titel',
-    '6d83dfb0-41b0-11ea-9125-af458cfb61c4': 'controleverzoek',
-    '91ed02a0-41b0-11ea-9125-af458cfb61c4': 'controlestatus',
-    'd3ffaee0-41b0-11ea-9125-af458cfb61c4': 'contract_status',
-    'd9938cf0-055b-11ea-9ee0-4f66993176e1': 'document_soort',
-    'b6f71e70-9d38-11eb-bebe-b5fce10145cf': 'bouwdeel',
-    '15369030-c1a7-11ed-a3ee-5d6c31021d9f': 'bouwnummer',
-    '33075090-c1a7-11ed-a3ee-5d6c31021d9f': 'bedrijf',
-    'f9961070-6f6a-11eb-84a6-c3eae4856606': 'ifc_timestamp',
-  };
+  // Property ID → veldnaam mapping DYNAMISCH ophalen uit PSet definitie
+  PROP_MAP = {};
+  try {
+    var defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+    var schema = defResp.schema || {};
+    var props = schema.properties || schema.props || {};
+    // TCM: TC property naam → onze veldnaam
+    for (var propId in props) {
+      var propDef = props[propId];
+      var propName = propDef.name || propDef.title || propId;
+      var veldNaam = TCM[propName];
+      if (veldNaam) {
+        PROP_MAP[propId] = veldNaam;
+      } else {
+        // Probeer fuzzy match: lowercase vergelijking
+        var lc = propName.toLowerCase().replace(/[^a-z]/g, '');
+        for (var tcKey in TCM) {
+          if (tcKey.toLowerCase().replace(/[^a-z]/g, '') === lc) { PROP_MAP[propId] = TCM[tcKey]; break; }
+        }
+      }
+    }
+    console.log('[TC] PROP_MAP dynamisch gebouwd:', Object.keys(PROP_MAP).length, 'velden', PROP_MAP);
+  } catch(e) {
+    console.warn('[TC] PSet definitie ophalen mislukt, gebruik fallback mapping:', e.message);
+    // Fallback: hardcoded mapping voor VW BVGO schema
+    PROP_MAP = {
+      '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
+      'a442e490-d47a-11ee-8133-af31c2576a74': 'revisie',
+      'cbc46730-41af-11ea-9125-af458cfb61c4': 'document_status',
+      'c83d7d90-055a-11ea-9ee0-4f66993176e1': 'project_fase',
+      '202e0b40-055c-11ea-9ee0-4f66993176e1': 'discipline',
+      '27e4c520-6f6b-11eb-84a6-c3eae4856606': 'document_nummer',
+      '502b6300-b19b-11eb-a211-dbedff274ddf': 'titel',
+      'd9938cf0-055b-11ea-9ee0-4f66993176e1': 'document_soort',
+      'b6f71e70-9d38-11eb-bebe-b5fce10145cf': 'bouwdeel',
+      '15369030-c1a7-11ed-a3ee-5d6c31021d9f': 'bouwnummer',
+      '33075090-c1a7-11ed-a3ee-5d6c31021d9f': 'bedrijf',
+    };
+  }
 
   // Haal alle psets op via /libs/{libId}/psets
   var psetsResp;
@@ -942,8 +967,20 @@ function bouwTH() {
   h.appendChild(tr);
 }
 
+function resetFilters() {
+  document.getElementById('searchBox').value = '';
+  document.querySelectorAll('#filterRows select').forEach(function(sel) { sel.value = ''; });
+  document.getElementById('fGroep').value = '';
+  var nm = document.getElementById('fNoMeta'); if (nm) nm.checked = false;
+  actMap = null;
+  document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
+  var alle = document.querySelector('.tr-row'); if (alle) alle.classList.add('act');
+  renderT();
+}
+
 function filt() {
   var z = document.getElementById('searchBox').value.toLowerCase();
+  var noMeta = document.getElementById('fNoMeta') && document.getElementById('fNoMeta').checked;
   // Verzamel actieve filters dynamisch
   var activeFilters = [];
   document.querySelectorAll('#filterRows select').forEach(function(sel) {
@@ -953,6 +990,10 @@ function filt() {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
     for (var i = 0; i < activeFilters.length; i++) {
       if (d[activeFilters[i].k] !== activeFilters[i].v) return false;
+    }
+    if (noMeta) {
+      var heeftMeta = d.document_status || d.discipline || d.project_fase || d.document_datum;
+      if (heeftMeta) return false;
     }
     if (z) { var parts = []; getCols().forEach(function(c) { if (d[c.k]) parts.push(d[c.k]); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
