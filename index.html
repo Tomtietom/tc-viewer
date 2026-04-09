@@ -292,12 +292,23 @@ var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
+var COL_CONFIG_VERSION = 2; // Verhoog bij structurele wijzigingen
 function loadColConfig() {
   try {
     var raw = localStorage.getItem(getColConfigKey());
     if (!raw) return;
     var cfg = JSON.parse(raw);
-    if (cfg.visible && Array.isArray(cfg.visible)) visibleColKeys = new Set(cfg.visible);
+    // Reset als config van oude versie is
+    if (!cfg._v || cfg._v < COL_CONFIG_VERSION) { console.log('[Cols] Oude config gereset naar defaults'); return; }
+    if (cfg.visible && Array.isArray(cfg.visible)) {
+      visibleColKeys = new Set(cfg.visible);
+      // Voeg kolommen toe die nieuw zijn sinds de config werd opgeslagen
+      DEFAULT_VISIBLE.forEach(function(k) {
+        var inAllCols = ALL_COLS.some(function(c) { return c.k === k; });
+        var wasBekend = cfg._knownKeys && cfg._knownKeys.indexOf(k) >= 0;
+        if (inAllCols && !wasBekend) visibleColKeys.add(k);
+      });
+    }
     if (cfg.custom && Array.isArray(cfg.custom)) customCols = cfg.custom;
     if (cfg.customData) customData = cfg.customData;
     _customCounter = customCols.length;
@@ -308,7 +319,9 @@ function saveColConfig() {
     localStorage.setItem(getColConfigKey(), JSON.stringify({
       visible: Array.from(visibleColKeys),
       custom: customCols,
-      customData: customData
+      customData: customData,
+      _knownKeys: ALL_COLS.map(function(c) { return c.k; }),
+      _v: COL_CONFIG_VERSION
     }));
   } catch(e) { console.warn('[Cols] Config opslaan mislukt:', e); }
 }
@@ -778,6 +791,12 @@ function vulFilters() {
   filterCols.forEach(function(c) { sets[c.k] = new Set(); });
   docs.forEach(function(d) { for (var k in sets) { if (d[k]) sets[k].add(d[k]); } });
 
+  // Bewaar huidige filterwaarden
+  var curFilters = {};
+  document.querySelectorAll('#filterRows select').forEach(function(sel) {
+    if (sel.value && sel.dataset.fk) curFilters[sel.dataset.fk] = sel.value;
+  });
+
   // Bouw filter dropdowns (2 per rij)
   var container = document.getElementById('filterRows');
   container.innerHTML = '';
@@ -790,6 +809,7 @@ function vulFilters() {
       sel.dataset.fk = c.k;
       var defOpt = document.createElement('option'); defOpt.value = ''; defOpt.textContent = c.l; sel.appendChild(defOpt);
       Array.from(sets[c.k]).sort().forEach(function(w) { var o = document.createElement('option'); o.value = w; o.textContent = w; sel.appendChild(o); });
+      if (curFilters[c.k]) sel.value = curFilters[c.k];
       sel.addEventListener('change', renderT);
       row.appendChild(sel);
     }
@@ -860,7 +880,7 @@ function toggleCol(key) {
   if (visibleColKeys.has(key)) visibleColKeys.delete(key); else visibleColKeys.add(key);
   COLS = getCols();
   saveColConfig();
-  vulFilters(); bouwTH(); renderT();
+  vulFilters(); if (editMode) vulBulkFields(); bouwTH(); renderT();
 }
 function addMetaCol() {
   var hidden = ALL_COLS.filter(function(c) { return !visibleColKeys.has(c.k); });
