@@ -153,6 +153,21 @@ td a:hover{text-decoration:underline}
 .dp-row .dv{font-weight:500;text-align:right;max-width:160px;word-break:break-all}
 .dp-tc{display:block;margin:10px 16px;padding:10px;background:var(--af);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;font-family:'Poppins',sans-serif}
 .dp-tc:hover{background:var(--af2)}
+.modal-bg{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
+.modal-bg.vis{display:flex}
+.modal{background:#fff;border-radius:14px;padding:28px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.15)}
+.modal h3{font-family:'Montserrat',sans-serif;font-size:16px;margin:0 0 16px}
+.modal label{display:block;font-size:11px;font-weight:600;color:#888;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.3px}
+.modal input,.modal textarea,.modal select{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:'Poppins',sans-serif;box-sizing:border-box}
+.modal textarea{height:80px;resize:vertical}
+.modal .file-list{background:#f8f9fa;border-radius:6px;padding:8px 12px;font-size:11px;color:#555;max-height:100px;overflow-y:auto;margin-bottom:4px}
+.modal .btn-row{display:flex;gap:8px;margin-top:16px}
+.modal .btn-primary{flex:1;padding:10px;background:var(--af);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif}
+.modal .btn-primary:hover{background:var(--af2)}
+.modal .btn-secondary{padding:10px 16px;background:#f0f0f0;color:#555;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Poppins',sans-serif}
+.modal .success-box{text-align:center;padding:20px 0}
+.modal .success-box .ic{font-size:48px;margin-bottom:8px}
+.modal .link-box{background:#f8f9fa;border-radius:6px;padding:10px;font-size:12px;word-break:break-all;margin:8px 0}
 .dp-preview{padding:10px 16px;border-bottom:1px solid #f0f0f0}
 .dp-preview h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:0 0 8px;font-family:'Montserrat',sans-serif}
 .dp-preview iframe,.dp-preview img{width:100%;border-radius:6px;border:1px solid #e8e0d8;background:#f9f9f9}
@@ -170,6 +185,7 @@ td a:hover{text-decoration:underline}
   <span class="spacer"></span>
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
   <button class="back-btn" id="relBtn" onclick="toonReleases()" style="display:none">&#128230; Releases</button>
+  <button class="action-btn" id="shareBtn" onclick="openShareDialog()" style="display:none">&#128228; Delen</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
   <button class="action-btn" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
   <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
@@ -247,6 +263,40 @@ td a:hover{text-decoration:underline}
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
     <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
+  </div>
+</div>
+
+<!-- DEEL MODAL -->
+<div class="modal-bg" id="shareModal">
+  <div class="modal">
+    <div id="shareForm">
+      <h3>&#128228; Documenten delen</h3>
+      <div class="file-list" id="shareFileList"></div>
+      <label>Email ontvangers (komma-gescheiden)</label>
+      <input type="text" id="shareEmails" placeholder="naam@bedrijf.nl, naam2@bedrijf.nl">
+      <label>Bericht</label>
+      <textarea id="shareMsg" placeholder="Optioneel bericht voor de ontvangers..." maxlength="1024"></textarea>
+      <div style="display:flex;gap:12px">
+        <div style="flex:1"><label>Toestemming</label><select id="sharePerm"><option value="VIEW">Bekijken</option><option value="DOWNLOAD">Downloaden</option></select></div>
+        <div style="flex:1"><label>Vervaldatum (optioneel)</label><input type="date" id="shareExpiry"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="closeShareDialog()">Annuleren</button>
+        <button class="btn-primary" id="shareSubmitBtn" onclick="sendShare()">&#128228; Verzenden</button>
+      </div>
+    </div>
+    <div id="shareSuccess" style="display:none">
+      <div class="success-box">
+        <div class="ic">&#9989;</div>
+        <h3>Gedeeld!</h3>
+        <p id="shareSuccessMsg" style="font-size:13px;color:#666"></p>
+      </div>
+      <div class="link-box" id="shareLink"></div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="copyShareLink()">&#128203; Kopieer link + doclijst</button>
+        <button class="btn-primary" onclick="closeShareDialog()">Sluiten</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1524,6 +1574,9 @@ function updateSelection() {
   document.getElementById('editSelCount').textContent = cnt + ' geselecteerd';
   bar.style.display = (editMode && cnt > 0) ? 'flex' : (editMode ? 'flex' : 'none');
   if (cnt === 0) document.getElementById('editSelCount').textContent = 'Selecteer bestanden om bulk te bewerken';
+  // Delen knop tonen als bestanden geselecteerd
+  var shareBtn = document.getElementById('shareBtn');
+  if (shareBtn) shareBtn.style.display = (editMode && cnt > 0) ? 'block' : 'none';
 }
 
 // Bulk field change → populate values dropdown
@@ -1615,6 +1668,100 @@ async function saveCell(doc, field, value) {
   } catch(e) {
     console.warn('[TC] Opslaan mislukt:', e.message);
     alert('Opslaan mislukt: ' + e.message);
+  }
+}
+
+// === DELEN ===
+var _lastShareUrl = '', _lastShareDocs = [];
+
+function openShareDialog() {
+  var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
+  if (!selDocs.length) { alert('Selecteer eerst bestanden om te delen'); return; }
+  _lastShareDocs = selDocs;
+  // Vul bestandslijst
+  var list = document.getElementById('shareFileList');
+  var namen = selDocs.map(function(d) { return d.bestandsnaam; });
+  if (namen.length <= 10) { list.textContent = namen.join('\n'); }
+  else { list.textContent = namen.slice(0, 10).join('\n') + '\n... en ' + (namen.length - 10) + ' meer'; }
+  // Reset form
+  document.getElementById('shareEmails').value = '';
+  document.getElementById('shareMsg').value = '';
+  document.getElementById('sharePerm').value = 'VIEW';
+  document.getElementById('shareExpiry').value = '';
+  document.getElementById('shareForm').style.display = '';
+  document.getElementById('shareSuccess').style.display = 'none';
+  document.getElementById('shareModal').classList.add('vis');
+}
+
+function closeShareDialog() {
+  document.getElementById('shareModal').classList.remove('vis');
+}
+
+async function sendShare() {
+  var emails = document.getElementById('shareEmails').value.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e && e.indexOf('@') > 0; });
+  var msg = document.getElementById('shareMsg').value;
+  var perm = document.getElementById('sharePerm').value;
+  var expiry = document.getElementById('shareExpiry').value;
+
+  if (!emails.length) { alert('Vul minstens één geldig email adres in'); return; }
+
+  // Bouw doclijst samenvatting voor in het bericht
+  var docSummary = '\n\n--- Documentenlijst ---\n' + _lastShareDocs.map(function(d) {
+    return d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
+  }).join('\n');
+  var fullMsg = (msg + docSummary).substring(0, 1024);
+
+  var body = {
+    mode: 'PUBLIC',
+    projectId: pid,
+    permission: perm,
+    message: fullMsg,
+    notify: emails.map(function(e) { return { type: 'EMAIL', id: e }; }),
+    objects: _lastShareDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; })
+  };
+  if (expiry) body.expiryDate = new Date(expiry).toISOString();
+
+  var btn = document.getElementById('shareSubmitBtn');
+  btn.textContent = '⏳ Verzenden...'; btn.disabled = true;
+
+  try {
+    var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/shares', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) { var errTxt = await resp.text(); throw new Error(resp.status + ': ' + errTxt); }
+    var result = await resp.json();
+
+    // Verzamel share URLs
+    var shareUrls = (result.objects || []).map(function(o) { return o.url || ''; }).filter(function(u) { return u; });
+    _lastShareUrl = shareUrls.length ? 'https://web.connect.trimble.com' + shareUrls[0] : (result.url || '');
+
+    // Toon success
+    document.getElementById('shareForm').style.display = 'none';
+    document.getElementById('shareSuccess').style.display = '';
+    document.getElementById('shareSuccessMsg').textContent = _lastShareDocs.length + ' bestanden gedeeld met ' + emails.join(', ');
+    document.getElementById('shareLink').textContent = _lastShareUrl || 'Link beschikbaar in Trimble Connect';
+
+    console.log('[Share] Succesvol:', result);
+  } catch(e) {
+    console.error('[Share] Fout:', e);
+    alert('Delen mislukt: ' + e.message);
+  }
+  btn.textContent = '📨 Verzenden'; btn.disabled = false;
+}
+
+function copyShareLink() {
+  var text = _lastShareUrl + '\n\n--- Documentenlijst ---\n' + _lastShareDocs.map(function(d) {
+    return d.bestandsnaam + (d.document_status ? ' [' + d.document_status + ']' : '') + (d.revisie ? ' rev.' + d.revisie : '');
+  }).join('\n');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() { alert('Link + doclijst gekopieerd naar klembord!'); });
+  } else {
+    // Fallback
+    var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    alert('Link + doclijst gekopieerd naar klembord!');
   }
 }
 
