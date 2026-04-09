@@ -227,16 +227,7 @@ td a:hover{text-decoration:underline}
   <div class="main">
     <div id="editBar" style="display:none;padding:6px 12px;background:#fff8f0;border-bottom:1px solid #f0dcc8;font-size:12px;align-items:center;gap:10px">
       <span id="editSelCount" style="font-weight:600;color:var(--af)"></span>
-      <select id="bulkField" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
-        <option value="">Veld kiezen...</option>
-        <option value="document_status">Status</option>
-        <option value="discipline">Discipline</option>
-        <option value="project_fase">Fase</option>
-        <option value="bouwdeel">Bouwdeel</option>
-        <option value="document_nummer">Doc.nr</option>
-        <option value="titel">Omschrijving</option>
-        <option value="bedrijf">Bedrijf</option>
-      </select>
+      <select id="bulkField" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px"></select>
       <select id="bulkValue" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;max-width:160px"></select>
       <button onclick="bulkSave()" style="padding:3px 10px;background:var(--af);color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Toepassen</button>
       <span id="bulkStatus" style="font-size:11px;color:#888"></span>
@@ -245,7 +236,7 @@ td a:hover{text-decoration:underline}
       <div class="tbl-scrl"><table><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="opacity:.5">Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
   </div>
 </div>
 
@@ -279,6 +270,7 @@ const ALL_COLS = [
   {k:'revisie',l:'Rev.',w:'4%'},
   {k:'document_datum',l:'Datum',w:'7%'},
   {k:'document_status',l:'Status',w:'8%'},
+  {k:'_versie',l:'Versie',w:'4%'},
   {k:'_created',l:'Toegevoegd',w:'7%'},
   {k:'document_soort',l:'Document soort',w:'8%'},
   {k:'tags',l:'Tags',w:'8%'},
@@ -287,7 +279,7 @@ const ALL_COLS = [
   {k:'controlestatus',l:'Controlestatus',w:'8%'},
   {k:'controleverzoek',l:'Controleverzoek',w:'8%'},
 ];
-var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_created'];
+var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_created'];
 var visibleColKeys = new Set(DEFAULT_VISIBLE);
 var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
 var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
@@ -456,7 +448,7 @@ function vulDocs(files) {
       discipline: b.discipline||'', document_soort: b.document_soort||'',
       titel: b.titel||'', tags: b.tags||'',
       contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
-      controleverzoek: b.controleverzoek||'', _vid: b._vid||'',
+      controleverzoek: b.controleverzoek||'', _vid: b._vid||'', _versie: b._versie||'',
       _created: b._created||'', _modified: b._modified||'',
       _canEdit: b._canEdit !== false, _psetLink: b._psetLink||'frn:tcfile:'+(b._vid||''),
     };
@@ -571,7 +563,7 @@ async function tcGetItemsRecursive(folderId, pad, result) {
     if (item.type === 'FOLDER') {
       subFolders.push({ id: item.id, pad: volledigPad });
     } else {
-      result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '' });
+      result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '', _versie: item.revision || item.version || '' });
     }
   }
   _fetchedFolders++;
@@ -732,7 +724,7 @@ function toonDocs() {
 }
 
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
-var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','titel'];
+var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','titel'];
 function getFilterableCols() {
   return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1 && !c.custom; });
 }
@@ -1192,6 +1184,7 @@ function toggleEditMode() {
     document.getElementById('editBtn').innerHTML = '&#128275; Vergrendelen';
     document.getElementById('editBtn').style.background = 'var(--warn)';
     document.getElementById('editBar').style.display = 'flex';
+    vulBulkFields();
   } else {
     editMode = false;
     selectedDocs.clear();
@@ -1211,6 +1204,19 @@ function updateSelection() {
 }
 
 // Bulk field change → populate values dropdown
+function vulBulkFields() {
+  var bf = document.getElementById('bulkField');
+  if (!bf) return;
+  var cur = bf.value;
+  bf.innerHTML = '<option value="">Veld kiezen...</option>';
+  getCols().forEach(function(c) {
+    if (c.fixed || c.custom) return; // bestandsnaam en eigen kolommen overslaan
+    if (EDITABLE_COLS.indexOf(c.k) < 0) return; // alleen bewerkbare velden
+    var o = document.createElement('option'); o.value = c.k; o.textContent = c.l; bf.appendChild(o);
+  });
+  bf.value = cur;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var bf = document.getElementById('bulkField');
   if (bf) bf.addEventListener('change', function() {
