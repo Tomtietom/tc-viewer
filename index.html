@@ -252,7 +252,8 @@ let editMode=false, selectedDocs=new Set();
 var PROP_MAP = {};
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
-const PSET_PROXY = 'https://tc-proxy.tom-da0.workers.dev/pset';
+const PROXY_BASE = 'https://tc-proxy.tom-da0.workers.dev';
+const PSET_PROXY = PROXY_BASE + '/pset';
 const PSET_REGIONS = { europe: PSET_PROXY + '/eu', 'north america': PSET_PROXY + '/us', asia: PSET_PROXY + '/ap' };
 let TC_BASE = TC_API_REGIONS.europe;
 let PSET_BASE = PSET_REGIONS.europe;
@@ -933,7 +934,9 @@ async function downloadZIP() {
     var doc = filtered[i];
     if (!doc._vid) { failed++; continue; }
     try {
-      var url = TC_BASE + '/files/' + doc._vid + '/content';
+      // Download via proxy om CORS te vermijden
+      var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+      var url = PROXY_BASE + '/tc/' + tcRegion + '/files/' + doc._vid + '/content';
       var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
       if (!resp.ok) { failed++; continue; }
       var blob = await resp.blob();
@@ -950,6 +953,12 @@ async function downloadZIP() {
     }
     zipBtn.textContent = '⏳ ' + (downloaded + failed) + '/' + filtered.length;
   }
+
+  // Voeg documentenlijst CSV toe aan de ZIP
+  var csvH = COLS.map(function(c){return c.l;}).concat(['Map']);
+  var csvRows = filtered.map(function(doc) { return COLS.map(function(c){return '"'+(doc[c.k]||'').replace(/"/g,'""')+'"';}).concat(['"'+(doc.file_location||'')+'"']); });
+  var csvContent = '\ufeff' + [csvH.join(';')].concat(csvRows.map(function(r){return r.join(';');})).join('\n');
+  zip.file('_documentenlijst.csv', csvContent);
 
   // Genereer en download ZIP
   zipBtn.textContent = '⏳ ZIP maken...';
