@@ -460,9 +460,14 @@ async function fetchReleases() {
     } catch(e) { console.warn('[TC] Release files mislukt:', rel.name, e.message); }
     releases.push({ id: rel.id, name: rel.name, status: rel.status, filesCount: rel.filesCount || relFiles.length, dueDate: rel.dueDate, createdOn: rel.createdOn, notes: rel.notes, files: relFiles });
     relFiles.forEach(function(f) {
-      var fid = f.id || '';
+      var fid = f.fileId || f.id || '';
       if (!releaseMap[fid]) releaseMap[fid] = [];
       releaseMap[fid].push(rel.name);
+      // Match ook op naam als ID niet overeenkomt
+      if (f.name) {
+        var docByName = docs.find(function(d) { return d.bestandsnaam === f.name && !releaseMap[d._vid]; });
+        if (docByName && docByName._vid !== fid) { if (!releaseMap[docByName._vid]) releaseMap[docByName._vid] = []; releaseMap[docByName._vid].push(rel.name); }
+      }
     });
   }
   // Vul _releases op docs
@@ -1230,17 +1235,21 @@ async function downloadRelease(relId) {
 
   for (var i = 0; i < rel.files.length; i++) {
     var f = rel.files[i];
-    if (!f.id) { failed++; continue; }
+    // Zoek het bestand in onze docs lijst (meerdere ID velden proberen)
+    var fileId = f.fileId || f.id || '';
+    var doc = docs.find(function(d) { return d._vid === fileId; }) || docs.find(function(d) { return d.bestandsnaam === f.name; });
+    var dlFileId = (doc && doc._vid) ? doc._vid : fileId;
+    if (!dlFileId) { console.warn('[Release DL] Geen fileId voor:', f.name, f); failed++; continue; }
     try {
       var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-      var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + f.id + '/downloadurl', { headers: { 'Authorization': 'Bearer ' + tcToken } });
-      if (!dlResp.ok) { failed++; continue; }
+      var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + dlFileId + '/downloadurl', { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      if (!dlResp.ok) { console.warn('[Release DL] downloadurl mislukt:', dlFileId, dlResp.status); failed++; continue; }
       var dlData = await dlResp.json();
       var resp = await fetch(dlData.url);
       if (!resp.ok) { failed++; continue; }
       zip.file(f.name || ('file_' + i), await resp.blob());
       downloaded++;
-    } catch(e) { failed++; }
+    } catch(e) { console.warn('[Release DL] Fout:', f.name, e.message); failed++; }
     btn.textContent = '⏳ ' + (downloaded + failed) + '/' + rel.files.length;
   }
 
