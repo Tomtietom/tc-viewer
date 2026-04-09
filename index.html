@@ -1745,10 +1745,23 @@ async function sendShare(method) {
     });
     if (!resp.ok) { var errTxt = await resp.text(); throw new Error(resp.status + ': ' + errTxt); }
     var result = await resp.json();
+    console.log('[Share] Volledige API response:', JSON.stringify(result, null, 2));
 
-    // Verzamel share URLs
+    // Zoek de juiste publieke share URL
+    // TC geeft per object een url als /s/{token} — dat is de publieke link
     var shareUrls = (result.objects || []).map(function(o) { return o.url || ''; }).filter(function(u) { return u; });
-    _lastShareUrl = shareUrls.length ? 'https://web.connect.trimble.com' + shareUrls[0] : (result.url || '');
+    // Als er een share-level URL is, gebruik die (werkt voor meerdere bestanden)
+    if (result.url) {
+      _lastShareUrl = result.url.startsWith('http') ? result.url : 'https://web.connect.trimble.com' + result.url;
+    } else if (shareUrls.length === 1) {
+      _lastShareUrl = 'https://web.connect.trimble.com' + shareUrls[0];
+    } else if (shareUrls.length > 1) {
+      // Meerdere bestanden: gebruik de share ID voor een overzichtslink
+      _lastShareUrl = result.id ? 'https://web.connect.trimble.com/tc/app/share/' + result.id : 'https://web.connect.trimble.com' + shareUrls[0];
+    } else {
+      _lastShareUrl = '';
+    }
+    console.log('[Share] Gebruikte URL:', _lastShareUrl);
 
     // Markeer bestanden als gedeeld (localStorage)
     var shareLog = JSON.parse(localStorage.getItem('doclist-shared-' + pid) || '{}');
