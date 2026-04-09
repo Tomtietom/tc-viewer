@@ -297,14 +297,18 @@ var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
-var COL_CONFIG_VERSION = 2; // Verhoog bij structurele wijzigingen
+var COL_CONFIG_VERSION = 3; // Verhoog bij structurele wijzigingen
 function loadColConfig() {
   try {
     var raw = localStorage.getItem(getColConfigKey());
     if (!raw) return;
     var cfg = JSON.parse(raw);
     // Reset als config van oude versie is
-    if (!cfg._v || cfg._v < COL_CONFIG_VERSION) { console.log('[Cols] Oude config gereset naar defaults'); return; }
+    if (!cfg._v || cfg._v < COL_CONFIG_VERSION) {
+      console.log('[Cols] Oude config gereset naar defaults (v' + (cfg._v||0) + ' < v' + COL_CONFIG_VERSION + ')');
+      localStorage.removeItem(getColConfigKey());
+      return;
+    }
     if (cfg.visible && Array.isArray(cfg.visible)) {
       visibleColKeys = new Set(cfg.visible);
       // Voeg kolommen toe die nieuw zijn sinds de config werd opgeslagen
@@ -354,7 +358,12 @@ function goTo(id) {
   document.getElementById('editBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   if (id !== 'pgDocs' && editMode) { editMode = false; selectedDocs.clear(); }
 }
-function goBack() { const i = pages.indexOf(curPage); if (i > 1) goTo(pages[i-1]); }
+function goBack() {
+  // Nooit terug naar pgLoading of pgUpload
+  if (curPage === 'pgDocs') { goTo('pgDash'); renderDash(); }
+  else if (curPage === 'pgRel') { goTo('pgDash'); renderDash(); }
+  else if (curPage === 'pgDash') { goTo('pgDocs'); } // Dashboard → terug naar docs
+}
 
 // ============================================================
 //  TC EXTENSIE — Bewezen patroon uit Rechten Viewer
@@ -510,7 +519,7 @@ function vulDocs(files) {
     };
   });
   mapS = {};
-  docs.forEach(function(d) { var m = d.file_location || '(root)'; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
+  docs.forEach(function(d) { if (!d.file_location) d.file_location = '(root)'; var m = d.file_location; if (!mapS[m]) mapS[m] = []; mapS[m].push(d); });
 }
 
 async function tcAutoFetchData() {
