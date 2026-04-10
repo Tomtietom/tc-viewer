@@ -753,67 +753,82 @@ async function tcGetMetadata(projectId, bestanden) {
   console.log('[TC] PSet lib:', libId);
 
   // === PROP_MAP BOUWEN ===
-  // Strategie: probeer meerdere methoden om property UUIDs te mappen naar veldnamen
+  // === PROP_MAP bouwen: UUID → veldnaam ===
+  // Strategie: haal PSet definitie op, gebruik i18n voor namen, schema.props voor UUIDs
   PROP_MAP = {};
 
-  // Methode 1: Haal PSet definitie schema op en parse properties
+  // Helper: match een property naam naar TCM veldnaam
+  function matchTCM(name) {
+    if (!name) return null;
+    if (TCM[name]) return TCM[name];
+    // Fuzzy: lowercase, geen speciale tekens
+    var lc = name.toLowerCase().replace(/[^a-z]/g, '');
+    for (var k in TCM) { if (k.toLowerCase().replace(/[^a-z]/g, '') === lc) return TCM[k]; }
+    return null;
+  }
+
   try {
     var defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
-    console.log('[TC] PSet definitie:', JSON.stringify(defResp).substring(0, 500));
-
-    // Het schema kan direct in de response zitten, of als genest JSON Schema object
     var schema = defResp.schema || {};
-    var schemaVersion = defResp.v || schema.v || 1;
+    var schemaProps = schema.props || schema.properties || {};
+    var propIds = Object.keys(schemaProps).filter(function(k) { return k.indexOf('-') > 0; }); // UUIDs bevatten streepjes
+    var i18n = defResp.i18n || {};
 
-    // Zoek properties op alle mogelijke locaties
-    var props = null;
+    console.log('[TC] PSet definitie: schema.props=' + propIds.length + ' UUIDs, i18n keys=' + Object.keys(i18n).join(','));
+    if (Object.keys(i18n).length > 0) console.log('[TC] i18n data:', JSON.stringify(i18n).substring(0, 1000));
 
-    // A: schema.properties (JSON Schema formaat)
-    if (schema.properties && Object.keys(schema.properties).length > 0) {
-      props = schema.properties;
-      console.log('[TC] Props gevonden in schema.properties:', Object.keys(props).length);
-    }
+    // Methode A: i18n — property namen per locale
+    // Probeer meerdere i18n formaten:
+    // Format 1: { "nl": { "props": { "uuid": { "name": "..." } } } }
+    // Format 2: { "nl": { "uuid": "naam" } }
+    // Format 3: { "props": { "uuid": { "name": "..." } } }
+    // Format 4: { "uuid": "naam" }
+    // Format 5: { "nl": { "props": { "uuid": "naam" } } }
+    var i18nNames = {}; // uuid → naam
 
-    // B: Haal schema apart op via versie endpoint
-    if (!props || Object.keys(props).length === 0) {
-      try {
-        var schemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + schemaVersion);
-        console.log('[TC] Schema v' + schemaVersion + ' response:', JSON.stringify(schemaResp).substring(0, 500));
-        if (schemaResp.properties) {
-          props = schemaResp.properties;
-        } else if (typeof schemaResp === 'object') {
-          // Schema zelf kan het flat object zijn
-          props = schemaResp;
+    function extractI18nNames(obj) {
+      if (!obj || typeof obj !== 'object') return;
+      for (var key in obj) {
+        var val = obj[key];
+        // Als de key een UUID is (bevat streepjes) en de value een string → direct mapping
+        if (key.indexOf('-') > 0 && typeof val === 'string') { i18nNames[key] = val; continue; }
+        // Als de key een UUID is en value een object met name → pak name
+        if (key.indexOf('-') > 0 && val && typeof val === 'object' && val.name) { i18nNames[key] = val.name; continue; }
+        // Als de key een locale is (2-3 chars) of 'props' → recursief
+        if ((key.length <= 5 || key === 'props' || key === 'properties') && typeof val === 'object') {
+          extractI18nNames(val);
         }
-        console.log('[TC] Props uit schema endpoint:', props ? Object.keys(props).length : 0);
-      } catch(se) { console.warn('[TC] Schema versie endpoint mislukt:', se.message); }
-    }
-
-    // Parse de gevonden properties naar PROP_MAP
-    if (props && Object.keys(props).length > 0) {
-      for (var propId in props) {
-        if (propId.startsWith('$') || propId === 'type' || propId === 'required') continue; // skip JSON Schema meta keys
-        var propDef = typeof props[propId] === 'object' ? props[propId] : {};
-        // Zoek de property naam in title, name, description of de key zelf
-        var propName = propDef.title || propDef.name || propDef.description || propId;
-        var veldNaam = TCM[propName];
-        if (!veldNaam) {
-          // Fuzzy match: verwijder speciale tekens en vergelijk lowercase
-          var lc = propName.toLowerCase().replace(/[^a-z]/g, '');
-          for (var tcKey in TCM) {
-            if (tcKey.toLowerCase().replace(/[^a-z]/g, '') === lc) { veldNaam = TCM[tcKey]; break; }
-          }
-        }
-        if (veldNaam) PROP_MAP[propId] = veldNaam;
       }
-      console.log('[TC] PROP_MAP uit definitie:', Object.keys(PROP_MAP).length, 'velden');
+    }
+    extractI18nNames(i18n);
+    console.log('[TC] i18n namen gevonden:', Object.keys(i18nNames).length, i18nNames);
+
+    // Bouw PROP_MAP vanuit i18n namen
+    for (var uuid in i18nNames) {
+      var veld = matchTCM(i18nNames[uuid]);
+      if (veld) PROP_MAP[uuid] = veld;
+    }
+    if (Object.keys(PROP_MAP).length > 0) {
+      console.log('[TC] PROP_MAP uit i18n:', Object.keys(PROP_MAP).length, 'velden');
+    }
+
+    // Methode B: als i18n faalt, probeer schema.props keys direct (als ze leesbare namen zijn)
+    if (Object.keys(PROP_MAP).length === 0 && propIds.length > 0) {
+      propIds.forEach(function(pid) {
+        var propDef = schemaProps[pid] || {};
+        var naam = propDef.title || propDef.name || propDef.description || '';
+        var veld = matchTCM(naam);
+        if (veld) PROP_MAP[pid] = veld;
+      });
+      if (Object.keys(PROP_MAP).length > 0) {
+        console.log('[TC] PROP_MAP uit schema props:', Object.keys(PROP_MAP).length, 'velden');
+      }
     }
   } catch(e) {
     console.warn('[TC] PSet definitie ophalen mislukt:', e.message);
   }
 
-  // Methode 2: Als definitie faalt, bouw mapping uit de PSet instances zelf
-  // Haal alvast de instances op (nodig voor methode 2 en voor de metadata matching)
+  // Haal PSet instances op (nodig voor metadata matching)
   var psetsResp;
   try {
     psetsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets');
@@ -823,49 +838,7 @@ async function tcGetMetadata(projectId, bestanden) {
   }
   var instArray = psetsResp.items || [];
 
-  if (Object.keys(PROP_MAP).length === 0 && instArray.length > 0) {
-    console.log('[TC] Probeer PROP_MAP uit PSet instances af te leiden...');
-    // Verzamel alle unieke prop IDs en hun waarden
-    var propValues = {}; // { propId: Set van waarden }
-    var sampleCount = Math.min(instArray.length, 20);
-    for (var si = 0; si < sampleCount; si++) {
-      var sProps = instArray[si].props || {};
-      for (var spId in sProps) {
-        if (!propValues[spId]) propValues[spId] = new Set();
-        if (sProps[spId] && sProps[spId] !== '--') propValues[spId].add(String(sProps[spId]));
-      }
-    }
-    // Haal alle definitie versies op om property namen te vinden
-    try {
-      var versResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/versions');
-      var versions = Array.isArray(versResp) ? versResp : (versResp.items || []);
-      console.log('[TC] Definitie versies:', versions.length);
-      // Probeer elke versie tot we properties vinden
-      for (var vi = versions.length - 1; vi >= 0 && Object.keys(PROP_MAP).length === 0; vi--) {
-        var ver = versions[vi].v || versions[vi].version || (vi + 1);
-        try {
-          var vSchemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + ver);
-          var vProps = vSchemaResp.properties || vSchemaResp || {};
-          for (var vpId in vProps) {
-            if (vpId.startsWith('$') || vpId === 'type' || vpId === 'required') continue;
-            var vpDef = typeof vProps[vpId] === 'object' ? vProps[vpId] : {};
-            var vpName = vpDef.title || vpDef.name || vpDef.description || vpId;
-            var vpVeld = TCM[vpName];
-            if (!vpVeld) {
-              var vlc = vpName.toLowerCase().replace(/[^a-z]/g, '');
-              for (var vtcKey in TCM) {
-                if (vtcKey.toLowerCase().replace(/[^a-z]/g, '') === vlc) { vpVeld = TCM[vtcKey]; break; }
-              }
-            }
-            if (vpVeld) PROP_MAP[vpId] = vpVeld;
-          }
-          if (Object.keys(PROP_MAP).length > 0) console.log('[TC] PROP_MAP uit schema versie ' + ver + ':', Object.keys(PROP_MAP).length, 'velden');
-        } catch(ve) { /* skip versie */ }
-      }
-    } catch(verr) { console.warn('[TC] Versies ophalen mislukt:', verr.message); }
-  }
-
-  // Methode 3: Hardcoded fallback (Trimble Trainingproject UUIDs)
+  // Fallback: hardcoded UUIDs (VW BVGO schema)
   if (Object.keys(PROP_MAP).length === 0) {
     console.log('[TC] Gebruik fallback PROP_MAP (hardcoded)');
     PROP_MAP = {
