@@ -743,45 +743,120 @@ async function tcGetMetadata(projectId, bestanden) {
   var libId = 'tcproject:prod:' + projectId;
   console.log('[TC] PSet lib:', libId);
 
-  // Property ID → veldnaam mapping ophalen uit PSet definitie
+  // === PROP_MAP BOUWEN ===
+  // Strategie: probeer meerdere methoden om property UUIDs te mappen naar veldnamen
   PROP_MAP = {};
+
+  // Methode 1: Haal PSet definitie schema op en parse properties
   try {
     var defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
-    console.log('[TC] PSet definitie response keys:', Object.keys(defResp));
-    // Schema kan op meerdere plekken zitten afhankelijk van TC versie
+    console.log('[TC] PSet definitie:', JSON.stringify(defResp).substring(0, 500));
+
+    // Het schema kan direct in de response zitten, of als genest JSON Schema object
     var schema = defResp.schema || {};
-    // Probeer alle mogelijke locaties voor properties
-    var props = schema.properties || schema.props || schema.defs || defResp.properties || {};
-    // Als schema een array is van versies, pak de laatste
-    if (Array.isArray(schema)) { var lastSchema = schema[schema.length - 1]; props = (lastSchema && lastSchema.properties) || {}; }
-    // Als props leeg is, probeer het schema zelf als flat object (propId → {name, type})
-    if (Object.keys(props).length === 0 && schema.v) {
-      // Probeer via schema versie endpoint
+    var schemaVersion = defResp.v || schema.v || 1;
+
+    // Zoek properties op alle mogelijke locaties
+    var props = null;
+
+    // A: schema.properties (JSON Schema formaat)
+    if (schema.properties && Object.keys(schema.properties).length > 0) {
+      props = schema.properties;
+      console.log('[TC] Props gevonden in schema.properties:', Object.keys(props).length);
+    }
+
+    // B: Haal schema apart op via versie endpoint
+    if (!props || Object.keys(props).length === 0) {
       try {
-        var schemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + schema.v);
-        props = schemaResp.properties || schemaResp.props || schemaResp || {};
-        console.log('[TC] Schema v' + schema.v + ' opgehaald, props keys:', Object.keys(props).length);
-      } catch(se) { console.warn('[TC] Schema versie ophalen mislukt:', se.message); }
-    }
-    console.log('[TC] Props gevonden:', Object.keys(props).length, Object.keys(props).slice(0, 5));
-    for (var propId in props) {
-      var propDef = typeof props[propId] === 'object' ? props[propId] : {};
-      var propName = propDef.name || propDef.title || propId;
-      var veldNaam = TCM[propName];
-      if (veldNaam) {
-        PROP_MAP[propId] = veldNaam;
-      } else {
-        var lc = propName.toLowerCase().replace(/[^a-z]/g, '');
-        for (var tcKey in TCM) {
-          if (tcKey.toLowerCase().replace(/[^a-z]/g, '') === lc) { PROP_MAP[propId] = TCM[tcKey]; break; }
+        var schemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + schemaVersion);
+        console.log('[TC] Schema v' + schemaVersion + ' response:', JSON.stringify(schemaResp).substring(0, 500));
+        if (schemaResp.properties) {
+          props = schemaResp.properties;
+        } else if (typeof schemaResp === 'object') {
+          // Schema zelf kan het flat object zijn
+          props = schemaResp;
         }
-      }
+        console.log('[TC] Props uit schema endpoint:', props ? Object.keys(props).length : 0);
+      } catch(se) { console.warn('[TC] Schema versie endpoint mislukt:', se.message); }
     }
-    console.log('[TC] PROP_MAP dynamisch gebouwd:', Object.keys(PROP_MAP).length, 'velden');
+
+    // Parse de gevonden properties naar PROP_MAP
+    if (props && Object.keys(props).length > 0) {
+      for (var propId in props) {
+        if (propId.startsWith('$') || propId === 'type' || propId === 'required') continue; // skip JSON Schema meta keys
+        var propDef = typeof props[propId] === 'object' ? props[propId] : {};
+        // Zoek de property naam in title, name, description of de key zelf
+        var propName = propDef.title || propDef.name || propDef.description || propId;
+        var veldNaam = TCM[propName];
+        if (!veldNaam) {
+          // Fuzzy match: verwijder speciale tekens en vergelijk lowercase
+          var lc = propName.toLowerCase().replace(/[^a-z]/g, '');
+          for (var tcKey in TCM) {
+            if (tcKey.toLowerCase().replace(/[^a-z]/g, '') === lc) { veldNaam = TCM[tcKey]; break; }
+          }
+        }
+        if (veldNaam) PROP_MAP[propId] = veldNaam;
+      }
+      console.log('[TC] PROP_MAP uit definitie:', Object.keys(PROP_MAP).length, 'velden');
+    }
   } catch(e) {
     console.warn('[TC] PSet definitie ophalen mislukt:', e.message);
   }
-  // Fallback als dynamisch ophalen 0 velden oplevert
+
+  // Methode 2: Als definitie faalt, bouw mapping uit de PSet instances zelf
+  // Haal alvast de instances op (nodig voor methode 2 en voor de metadata matching)
+  var psetsResp;
+  try {
+    psetsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets');
+  } catch(e) {
+    console.warn('[TC] PSet ophalen mislukt:', e.message);
+    return;
+  }
+  var instArray = psetsResp.items || [];
+
+  if (Object.keys(PROP_MAP).length === 0 && instArray.length > 0) {
+    console.log('[TC] Probeer PROP_MAP uit PSet instances af te leiden...');
+    // Verzamel alle unieke prop IDs en hun waarden
+    var propValues = {}; // { propId: Set van waarden }
+    var sampleCount = Math.min(instArray.length, 20);
+    for (var si = 0; si < sampleCount; si++) {
+      var sProps = instArray[si].props || {};
+      for (var spId in sProps) {
+        if (!propValues[spId]) propValues[spId] = new Set();
+        if (sProps[spId] && sProps[spId] !== '--') propValues[spId].add(String(sProps[spId]));
+      }
+    }
+    // Haal alle definitie versies op om property namen te vinden
+    try {
+      var versResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/versions');
+      var versions = Array.isArray(versResp) ? versResp : (versResp.items || []);
+      console.log('[TC] Definitie versies:', versions.length);
+      // Probeer elke versie tot we properties vinden
+      for (var vi = versions.length - 1; vi >= 0 && Object.keys(PROP_MAP).length === 0; vi--) {
+        var ver = versions[vi].v || versions[vi].version || (vi + 1);
+        try {
+          var vSchemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + ver);
+          var vProps = vSchemaResp.properties || vSchemaResp || {};
+          for (var vpId in vProps) {
+            if (vpId.startsWith('$') || vpId === 'type' || vpId === 'required') continue;
+            var vpDef = typeof vProps[vpId] === 'object' ? vProps[vpId] : {};
+            var vpName = vpDef.title || vpDef.name || vpDef.description || vpId;
+            var vpVeld = TCM[vpName];
+            if (!vpVeld) {
+              var vlc = vpName.toLowerCase().replace(/[^a-z]/g, '');
+              for (var vtcKey in TCM) {
+                if (vtcKey.toLowerCase().replace(/[^a-z]/g, '') === vlc) { vpVeld = TCM[vtcKey]; break; }
+              }
+            }
+            if (vpVeld) PROP_MAP[vpId] = vpVeld;
+          }
+          if (Object.keys(PROP_MAP).length > 0) console.log('[TC] PROP_MAP uit schema versie ' + ver + ':', Object.keys(PROP_MAP).length, 'velden');
+        } catch(ve) { /* skip versie */ }
+      }
+    } catch(verr) { console.warn('[TC] Versies ophalen mislukt:', verr.message); }
+  }
+
+  // Methode 3: Hardcoded fallback (Trimble Trainingproject UUIDs)
   if (Object.keys(PROP_MAP).length === 0) {
     console.log('[TC] Gebruik fallback PROP_MAP (hardcoded)');
     PROP_MAP = {
@@ -803,17 +878,8 @@ async function tcGetMetadata(projectId, bestanden) {
       'f9961070-6f6a-11eb-84a6-c3eae4856606': 'ifc_timestamp',
     };
   }
+  console.log('[TC] PROP_MAP definitief:', Object.keys(PROP_MAP).length, 'velden', PROP_MAP);
 
-  // Haal alle psets op via /libs/{libId}/psets
-  var psetsResp;
-  try {
-    psetsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets');
-  } catch(e) {
-    console.warn('[TC] PSet ophalen mislukt:', e.message);
-    return;
-  }
-
-  var instArray = psetsResp.items || [];
   console.log('[TC] ' + instArray.length + ' PSet instances gevonden');
 
   // Bouw lookup: fileVID → bestand
