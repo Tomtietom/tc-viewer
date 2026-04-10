@@ -790,12 +790,12 @@ async function tcGetMetadata(projectId, bestanden) {
       if (!obj || typeof obj !== 'object') return;
       for (var key in obj) {
         var val = obj[key];
-        // Als de key een UUID is (bevat streepjes) en de value een string → direct mapping
-        if (key.indexOf('-') > 0 && typeof val === 'string') { i18nNames[key] = val; continue; }
+        // Als de key een UUID is (bevat streepjes, geen punt) en de value een string → direct mapping
+        if (key.indexOf('-') > 0 && key.indexOf('.') === -1 && typeof val === 'string') { i18nNames[key] = val; continue; }
         // Als de key een UUID is en value een object met name → pak name
-        if (key.indexOf('-') > 0 && val && typeof val === 'object' && val.name) { i18nNames[key] = val.name; continue; }
+        if (key.indexOf('-') > 0 && key.indexOf('.') === -1 && val && typeof val === 'object' && val.name) { i18nNames[key] = val.name; continue; }
         // Als de key een locale is (2-3 chars) of 'props' → recursief
-        if ((key.length <= 5 || key === 'props' || key === 'properties') && typeof val === 'object') {
+        if ((key.length <= 10 || key === 'props' || key === 'properties' || key === 'name') && typeof val === 'object') {
           extractI18nNames(val);
         }
       }
