@@ -685,6 +685,15 @@ async function tcAutoFetchData() {
     // === RELEASES OPHALEN ===
     try { await fetchReleases(); } catch(e) { console.warn('[TC] Releases mislukt:', e.message); }
 
+    // === DIAGNOSTIEK: metadata check ===
+    var metaDocs = docs.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; });
+    console.log('[TC] Docs met metadata:', metaDocs.length, '/', docs.length);
+    if (metaDocs.length > 0) {
+      console.log('[TC] Voorbeeld doc met metadata:', JSON.stringify(metaDocs[0]));
+    } else {
+      console.warn('[TC] GEEN docs met metadata gevonden! PROP_MAP:', PROP_MAP);
+    }
+
     // === DOCUMENTENLIJST TONEN (direct, dashboard op achtergrond) ===
     console.log('[TC] Documentenlijst tonen, docs:', docs.length);
     renderDash();
@@ -988,6 +997,9 @@ function toonDocs() {
     } catch(e) {}
     vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
     document.getElementById('searchBox').addEventListener('input', renderT);
+  } else {
+    // Herrender bij terugnavigatie (metadata kan intussen geladen zijn)
+    renderT();
   }
 }
 
@@ -1922,7 +1934,7 @@ async function sendShare(method) {
         var stoken = sObj.url.replace(/^\/s\//, '');
         if (shareMode === 'PUBLIC') {
           // Publieke link via eigen download-proxy (geen login nodig)
-          sUrl = PROXY_BASE + '/download/' + tcRegion + '/' + stoken;
+          sUrl = PROXY_BASE + '/download/' + tcRegion + '/' + stoken + (perm === 'VIEW' ? '?view=1' : '');
         } else {
           // TC link (vereist Trimble ID login)
           sUrl = 'https://web.connect.trimble.com' + sObj.url;
