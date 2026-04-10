@@ -277,17 +277,23 @@ td a:hover{text-decoration:underline}
       <label>Bericht</label>
       <textarea id="shareMsg" placeholder="Optioneel bericht..." maxlength="1024"></textarea>
       <div style="display:flex;gap:12px">
+        <div style="flex:1"><label>Delen met</label>
+          <select id="shareMode" onchange="updateShareModeInfo()">
+            <option value="REGISTERED_USERS">Ingelogde gebruikers (aanbevolen)</option>
+            <option value="PUBLIC">Elke gebruiker met de link</option>
+            <option value="PROJECT_USERS">Alleen projectleden</option>
+          </select>
+        </div>
         <div style="flex:1"><label>Toestemming</label><select id="sharePerm"><option value="VIEW">Bekijken</option><option value="DOWNLOAD">Downloaden</option></select></div>
+      </div>
+      <div style="display:flex;gap:12px">
         <div style="flex:1"><label>Vervaldatum</label><input type="date" id="shareExpiry"></div>
       </div>
+      <div id="shareModeInfo" style="font-size:10px;padding:6px 8px;border-radius:4px;margin-top:4px;background:#cce5ff;color:#004085">Ontvanger moet inloggen met Trimble ID. Toegang wordt gelogd.</div>
       <div class="btn-row">
         <button class="btn-secondary" onclick="closeShareDialog()">Annuleren</button>
         <button class="btn-primary" id="shareSubmitBtn" onclick="sendShare('email')">&#9993; Via eigen email</button>
         <button class="btn-primary" id="shareTcBtn" onclick="sendShare('tc')" style="background:var(--info)">&#128228; Via Trimble Connect</button>
-      </div>
-      <div style="font-size:10px;color:#888;margin-top:8px;text-align:center">
-        <b>Via eigen email</b>: maakt link aan en opent je mailprogramma<br>
-        <b>Via Trimble Connect</b>: TC stuurt email naar de ontvangers
       </div>
     </div>
     <div id="shareSuccess" style="display:none">
@@ -1691,11 +1697,28 @@ function openShareDialog() {
   document.getElementById('shareEmails').value = '';
   document.getElementById('shareMsg').value = '';
   document.getElementById('sharePerm').value = 'VIEW';
+  document.getElementById('shareMode').value = 'REGISTERED_USERS';
   var defExpiry = new Date(); defExpiry.setDate(defExpiry.getDate() + 14);
   document.getElementById('shareExpiry').value = defExpiry.toISOString().split('T')[0];
+  updateShareModeInfo();
   document.getElementById('shareForm').style.display = '';
   document.getElementById('shareSuccess').style.display = 'none';
   document.getElementById('shareModal').classList.add('vis');
+}
+
+function updateShareModeInfo() {
+  var mode = document.getElementById('shareMode').value;
+  var el = document.getElementById('shareModeInfo');
+  if (mode === 'REGISTERED_USERS') {
+    el.style.background = '#cce5ff'; el.style.color = '#004085';
+    el.innerHTML = '&#128274; Ontvanger moet inloggen met Trimble ID. Toegang wordt gelogd.';
+  } else if (mode === 'PUBLIC') {
+    el.style.background = '#fff3cd'; el.style.color = '#856404';
+    el.innerHTML = '&#9888; <b>Openbaar!</b> Iedereen met de link kan de bestanden openen zonder login. Alleen aanmaak wordt gelogd, niet wie het opent.';
+  } else {
+    el.style.background = '#d4edda'; el.style.color = '#155724';
+    el.innerHTML = '&#128274; Alleen bestaande projectleden kunnen de bestanden openen.';
+  }
 }
 
 function closeShareDialog() {
@@ -1706,13 +1729,25 @@ async function sendShare(method) {
   var emails = document.getElementById('shareEmails').value.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e && e.indexOf('@') > 0; });
   var msg = document.getElementById('shareMsg').value;
   var perm = document.getElementById('sharePerm').value;
+  var shareMode = document.getElementById('shareMode').value;
   var expiry = document.getElementById('shareExpiry').value;
 
   // TC methode vereist emails
   if (method === 'tc' && !emails.length) { alert('Vul minstens één email adres in voor TC verzending'); return; }
+  // PROJECT_USERS vereist TC methode
+  if (shareMode === 'PROJECT_USERS' && method === 'email') { alert('Delen met projectleden werkt alleen via Trimble Connect, niet via eigen email.'); return; }
 
-  // Waarschuwing: openbaar delen
-  if (!confirm('⚠️ LET OP: OPENBAAR DELEN\n\nDeze ' + _lastShareDocs.length + ' bestanden worden publiek beschikbaar via een link.\nIedereen met de link kan de bestanden ' + (perm === 'DOWNLOAD' ? 'downloaden' : 'bekijken') + '.\n\nVervaldatum: ' + (expiry || 'geen') + '\n\nDeze actie wordt gelogd in het TC activiteitenfeed.\n\nDoorgaan?')) return;
+  // Waarschuwing per mode
+  var confirmMsg = '';
+  if (shareMode === 'PUBLIC') {
+    confirmMsg = '⚠️ LET OP: OPENBAAR DELEN\n\nDeze ' + _lastShareDocs.length + ' bestanden worden publiek beschikbaar.\nIedereen met de link kan de bestanden ' + (perm === 'DOWNLOAD' ? 'downloaden' : 'bekijken') + ' zonder login.\n\nAlleen aanmaak wordt gelogd, niet wie het opent.\nVervaldatum: ' + (expiry || 'geen');
+  } else if (shareMode === 'REGISTERED_USERS') {
+    confirmMsg = _lastShareDocs.length + ' bestanden delen met ingelogde gebruikers.\n\nOntvangers moeten inloggen met Trimble ID.\nToegang wordt gelogd.\nVervaldatum: ' + (expiry || 'geen');
+  } else {
+    confirmMsg = _lastShareDocs.length + ' bestanden delen met projectleden.\n\nAlleen bestaande leden kunnen de bestanden openen.';
+  }
+  confirmMsg += '\n\nDeze actie wordt gelogd in het TC activiteitenfeed.\n\nDoorgaan?';
+  if (!confirm(confirmMsg)) return;
 
   // Bouw doclijst samenvatting
   var docSummary = '\n\n--- Documentenlijst ---\n' + _lastShareDocs.map(function(d) {
@@ -1721,13 +1756,13 @@ async function sendShare(method) {
   var fullMsg = (msg + docSummary).substring(0, 1024);
 
   var body = {
-    mode: 'PUBLIC',
+    mode: shareMode,
     projectId: pid,
     permission: perm,
     message: fullMsg,
     objects: _lastShareDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; })
   };
-  // Alleen TC notify als method=tc (voorkomt dubbele mail)
+  // PROJECT_USERS: notify met USER/GROUP, anders EMAIL
   if (method === 'tc' && emails.length) {
     body.notify = emails.map(function(e) { return { type: 'EMAIL', id: e }; });
   }
@@ -1747,16 +1782,27 @@ async function sendShare(method) {
     var result = await resp.json();
     console.log('[Share] Volledige API response:', JSON.stringify(result, null, 2));
 
-    // Bouw per-bestand publieke links
+    // Bouw per-bestand links
     var shareObjects = result.objects || [];
     _lastShareLinks = [];
     for (var si = 0; si < _lastShareDocs.length; si++) {
       var sObj = shareObjects[si];
-      var sUrl = sObj && sObj.url ? 'https://web.connect.trimble.com' + sObj.url : '';
+      var sUrl = '';
+      if (sObj && sObj.url) {
+        // Haal stoken uit /s/{stoken}
+        var stoken = sObj.url.replace(/^\/s\//, '');
+        if (shareMode === 'PUBLIC') {
+          // Publieke link via eigen download-proxy (geen login nodig)
+          sUrl = PROXY_BASE + '/download/' + tcRegion + '/' + stoken;
+        } else {
+          // TC link (vereist Trimble ID login)
+          sUrl = 'https://web.connect.trimble.com' + sObj.url;
+        }
+      }
       _lastShareLinks.push({ name: _lastShareDocs[si].bestandsnaam, url: sUrl });
     }
     _lastShareUrl = _lastShareLinks.length === 1 ? _lastShareLinks[0].url : '';
-    console.log('[Share] Links per bestand:', _lastShareLinks);
+    console.log('[Share] Mode:', shareMode, '| Links per bestand:', _lastShareLinks);
 
     // Markeer bestanden als gedeeld (localStorage)
     var shareLog = JSON.parse(localStorage.getItem('doclist-shared-' + pid) || '{}');
