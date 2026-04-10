@@ -229,7 +229,15 @@ td a:hover{text-decoration:underline}
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div id="filterRows"></div>
       <div class="frow" style="margin-top:6px">
-        <label style="font-size:10px;display:flex;align-items:center;gap:4px;cursor:pointer;color:#888"><input type="checkbox" id="fNoMeta" onchange="renderT()"> Zonder metadata</label>
+        <select id="fMetaFilter" onchange="renderT()" style="font-size:10px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;font-family:Poppins,sans-serif;color:#555;flex:1">
+          <option value="">Alle documenten</option>
+          <option value="with">Alleen met metadata</option>
+          <option value="without">Alleen zonder metadata</option>
+          <option value="incomplete">Verplichte metadata incompleet</option>
+        </select>
+        <select id="fRelease" onchange="renderT()" style="font-size:10px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;font-family:Poppins,sans-serif;color:#555;flex:1"></select>
+      </div>
+      <div class="frow" style="margin-top:4px">
         <span style="flex:1"></span>
         <button onclick="resetFilters()" style="font-size:10px;padding:2px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:Poppins,sans-serif;color:#888">Reset filters</button>
       </div>
@@ -243,7 +251,6 @@ td a:hover{text-decoration:underline}
         <div id="colChecks"></div>
         <div style="display:flex;gap:4px;margin-top:6px">
           <button onclick="addMetaCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Metadata</button>
-          <button onclick="addCustomCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Eigen kolom</button>
         </div>
       </div>
     </div>
@@ -736,43 +743,64 @@ async function tcGetMetadata(projectId, bestanden) {
   var libId = 'tcproject:prod:' + projectId;
   console.log('[TC] PSet lib:', libId);
 
-  // Property ID → veldnaam mapping DYNAMISCH ophalen uit PSet definitie
+  // Property ID → veldnaam mapping ophalen uit PSet definitie
   PROP_MAP = {};
   try {
     var defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+    console.log('[TC] PSet definitie response keys:', Object.keys(defResp));
+    // Schema kan op meerdere plekken zitten afhankelijk van TC versie
     var schema = defResp.schema || {};
-    var props = schema.properties || schema.props || {};
-    // TCM: TC property naam → onze veldnaam
+    // Probeer alle mogelijke locaties voor properties
+    var props = schema.properties || schema.props || schema.defs || defResp.properties || {};
+    // Als schema een array is van versies, pak de laatste
+    if (Array.isArray(schema)) { var lastSchema = schema[schema.length - 1]; props = (lastSchema && lastSchema.properties) || {}; }
+    // Als props leeg is, probeer het schema zelf als flat object (propId → {name, type})
+    if (Object.keys(props).length === 0 && schema.v) {
+      // Probeer via schema versie endpoint
+      try {
+        var schemaResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles/schema/' + schema.v);
+        props = schemaResp.properties || schemaResp.props || schemaResp || {};
+        console.log('[TC] Schema v' + schema.v + ' opgehaald, props keys:', Object.keys(props).length);
+      } catch(se) { console.warn('[TC] Schema versie ophalen mislukt:', se.message); }
+    }
+    console.log('[TC] Props gevonden:', Object.keys(props).length, Object.keys(props).slice(0, 5));
     for (var propId in props) {
-      var propDef = props[propId];
+      var propDef = typeof props[propId] === 'object' ? props[propId] : {};
       var propName = propDef.name || propDef.title || propId;
       var veldNaam = TCM[propName];
       if (veldNaam) {
         PROP_MAP[propId] = veldNaam;
       } else {
-        // Probeer fuzzy match: lowercase vergelijking
         var lc = propName.toLowerCase().replace(/[^a-z]/g, '');
         for (var tcKey in TCM) {
           if (tcKey.toLowerCase().replace(/[^a-z]/g, '') === lc) { PROP_MAP[propId] = TCM[tcKey]; break; }
         }
       }
     }
-    console.log('[TC] PROP_MAP dynamisch gebouwd:', Object.keys(PROP_MAP).length, 'velden', PROP_MAP);
+    console.log('[TC] PROP_MAP dynamisch gebouwd:', Object.keys(PROP_MAP).length, 'velden');
   } catch(e) {
-    console.warn('[TC] PSet definitie ophalen mislukt, gebruik fallback mapping:', e.message);
-    // Fallback: hardcoded mapping voor VW BVGO schema
+    console.warn('[TC] PSet definitie ophalen mislukt:', e.message);
+  }
+  // Fallback als dynamisch ophalen 0 velden oplevert
+  if (Object.keys(PROP_MAP).length === 0) {
+    console.log('[TC] Gebruik fallback PROP_MAP (hardcoded)');
     PROP_MAP = {
       '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
+      '3d82d630-c1a6-11ed-a3ee-5d6c31021d9f': 'document_aanmaak_datum',
       'a442e490-d47a-11ee-8133-af31c2576a74': 'revisie',
       'cbc46730-41af-11ea-9125-af458cfb61c4': 'document_status',
       'c83d7d90-055a-11ea-9ee0-4f66993176e1': 'project_fase',
       '202e0b40-055c-11ea-9ee0-4f66993176e1': 'discipline',
       '27e4c520-6f6b-11eb-84a6-c3eae4856606': 'document_nummer',
       '502b6300-b19b-11eb-a211-dbedff274ddf': 'titel',
+      '6d83dfb0-41b0-11ea-9125-af458cfb61c4': 'controleverzoek',
+      '91ed02a0-41b0-11ea-9125-af458cfb61c4': 'controlestatus',
+      'd3ffaee0-41b0-11ea-9125-af458cfb61c4': 'contract_status',
       'd9938cf0-055b-11ea-9ee0-4f66993176e1': 'document_soort',
       'b6f71e70-9d38-11eb-bebe-b5fce10145cf': 'bouwdeel',
       '15369030-c1a7-11ed-a3ee-5d6c31021d9f': 'bouwnummer',
       '33075090-c1a7-11ed-a3ee-5d6c31021d9f': 'bedrijf',
+      'f9961070-6f6a-11eb-84a6-c3eae4856606': 'ifc_timestamp',
     };
   }
 
@@ -945,6 +973,17 @@ function vulFilters() {
     var o = document.createElement('option'); o.value = c.k; o.textContent = 'Groepeer: ' + c.l; grp.appendChild(o);
   });
   grp.value = curGrp;
+
+  // Release filter dropdown
+  var relSel = document.getElementById('fRelease');
+  if (relSel) {
+    var curRel = relSel.value || '';
+    relSel.innerHTML = '<option value="">Alle releases</option>';
+    releases.forEach(function(r) {
+      var o = document.createElement('option'); o.value = r.name; o.textContent = r.name; relSel.appendChild(o);
+    });
+    relSel.value = curRel;
+  }
 }
 
 function bouwBoom() {
@@ -1125,7 +1164,8 @@ function resetFilters() {
   document.getElementById('searchBox').value = '';
   document.querySelectorAll('#filterRows select').forEach(function(sel) { sel.value = ''; });
   document.getElementById('fGroep').value = '';
-  var nm = document.getElementById('fNoMeta'); if (nm) nm.checked = false;
+  var mf = document.getElementById('fMetaFilter'); if (mf) mf.value = '';
+  var rf = document.getElementById('fRelease'); if (rf) rf.value = '';
   actMap = null;
   document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
   var alle = document.querySelector('.tr-row'); if (alle) alle.classList.add('act');
@@ -1134,7 +1174,9 @@ function resetFilters() {
 
 function filt() {
   var z = document.getElementById('searchBox').value.toLowerCase();
-  var noMeta = document.getElementById('fNoMeta') && document.getElementById('fNoMeta').checked;
+  var metaFilter = (document.getElementById('fMetaFilter') || {}).value || '';
+  var relFilter = (document.getElementById('fRelease') || {}).value || '';
+  var VERPLICHT = ['bedrijf','discipline','titel','document_datum','document_status','document_nummer'];
   // Verzamel actieve filters dynamisch
   var activeFilters = [];
   document.querySelectorAll('#filterRows select').forEach(function(sel) {
@@ -1145,9 +1187,16 @@ function filt() {
     for (var i = 0; i < activeFilters.length; i++) {
       if (docVal(d, activeFilters[i].k) !== activeFilters[i].v) return false;
     }
-    if (noMeta) {
+    if (relFilter && (!d._releases || d._releases.indexOf(relFilter) === -1)) return false;
+    if (metaFilter === 'without') {
       var heeftMeta = d.document_status || d.discipline || d.project_fase || d.document_datum;
       if (heeftMeta) return false;
+    } else if (metaFilter === 'with') {
+      var heeftMeta2 = d.document_status || d.discipline || d.project_fase || d.document_datum;
+      if (!heeftMeta2) return false;
+    } else if (metaFilter === 'incomplete') {
+      var compleet = VERPLICHT.every(function(k) { return d[k] && d[k].trim && d[k].trim() !== '' && d[k] !== '--'; });
+      if (compleet) return false;
     }
     if (z) { var parts = []; getCols().forEach(function(c) { parts.push(docVal(d, c.k)); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
@@ -1398,6 +1447,7 @@ function toonReleaseDetail(relId) {
   html += '<div style="display:flex;gap:8px;margin-bottom:16px">';
   html += '<button class="nav-btn" style="width:auto;padding:8px 20px;font-size:12px" onclick="downloadRelease(\'' + rel.id + '\')">&#128230; Download ZIP + CSV</button>';
   html += '<button class="nav-btn sec" style="width:auto;padding:8px 20px;font-size:12px" onclick="exportReleaseCSV(\'' + rel.id + '\')">&#11015; Alleen CSV</button>';
+  html += '<button class="nav-btn sec" style="width:auto;padding:8px 20px;font-size:12px" onclick="shareRelease(\'' + rel.id + '\')">&#128228; Delen</button>';
   html += '</div>';
 
   // Bestanden tabel
@@ -1683,6 +1733,19 @@ async function saveCell(doc, field, value) {
 
 // === DELEN ===
 var _lastShareUrl = '', _lastShareDocs = [], _lastShareLinks = [];
+
+function shareRelease(relId) {
+  var rel = releases.find(function(r) { return r.id === relId; });
+  if (!rel || !rel.files.length) { alert('Geen bestanden in deze release'); return; }
+  // Maak een selectie van de release bestanden zodat openShareDialog ze oppakt
+  selectedDocs.clear();
+  rel.files.forEach(function(f) {
+    var fid = f.fileId || f.id || '';
+    var doc = docs.find(function(d) { return d._vid === fid; }) || docs.find(function(d) { return d.bestandsnaam === f.name; });
+    if (doc) selectedDocs.add(doc._vid);
+  });
+  openShareDialog();
+}
 
 function openShareDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
