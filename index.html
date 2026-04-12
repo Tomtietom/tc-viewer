@@ -1159,12 +1159,12 @@ function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
   // Colgroup voor kolombreedte
   var cg = document.getElementById('tColGroup'); cg.innerHTML = '';
-  var cbCol = document.createElement('col'); cbCol.style.width = '36px'; cg.appendChild(cbCol);
+  var cbCol = document.createElement('col'); cbCol.style.width = '40px'; cg.appendChild(cbCol);
   COLS.forEach(function(c) { var col = document.createElement('col'); if (colWidths[c.k]) col.style.width = colWidths[c.k]; else if (c.w) col.style.width = c.w; cg.appendChild(col); });
 
   var tr = document.createElement('tr');
   // Checkbox kolom (altijd zichtbaar voor selectie/delen)
-  var thCb = document.createElement('th'); thCb.style.cssText = 'text-align:center;padding:2px 0';
+  var thCb = document.createElement('th'); thCb.style.cssText = 'text-align:center;padding:2px 4px 2px 8px';
   var cb = document.createElement('input'); cb.type = 'checkbox';
   cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); }); updateSelection(); document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
   thCb.appendChild(cb); tr.appendChild(thCb);
@@ -1314,7 +1314,7 @@ function renderT() {
       if (selDoc===doc) tr.classList.add('sel');
 
       // Checkbox (altijd zichtbaar)
-      var tdCb = document.createElement('td'); tdCb.style.cssText = 'text-align:center;padding:2px 0';
+      var tdCb = document.createElement('td'); tdCb.style.cssText = 'text-align:center;padding:2px 4px 2px 8px';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
       cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
       cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
