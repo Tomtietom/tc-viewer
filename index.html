@@ -1561,7 +1561,7 @@ function toonReleaseDetail(relId) {
 
   // Bestanden tabel
   html += '<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.04)">';
-  html += '<thead><tr style="background:var(--gr);text-align:left"><th style="padding:8px 12px">Bestandsnaam</th><th style="padding:8px">Revisie</th><th style="padding:8px">Gewijzigd</th></tr></thead><tbody>';
+  html += '<thead><tr style="background:var(--gr);text-align:left"><th style="padding:8px 12px">Bestandsnaam</th><th style="padding:8px">Revisie</th><th style="padding:8px">Gewijzigd</th><th style="padding:8px;width:40px"></th></tr></thead><tbody>';
   rel.files.forEach(function(f) {
     // Zoek doc in hoofdlijst voor extra metadata
     var doc = docs.find(function(d) { return d._vid === f.id; });
@@ -1572,10 +1572,28 @@ function toonReleaseDetail(relId) {
     if (pid && f.id) {
       html += '<a href="' + tcFileUrl(f.id, naam) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
     } else { html += naam; }
-    html += '</td><td style="padding:8px">' + rev + '</td><td style="padding:8px;color:#888">' + mod + '</td></tr>';
+    html += '</td><td style="padding:8px">' + rev + '</td><td style="padding:8px;color:#888">' + mod + '</td>';
+    html += '<td style="padding:8px;text-align:center"><button onclick="removeFromRelease(\'' + rel.id + '\',\'' + (f.id||'') + '\',\'' + naam.replace(/'/g,"\\'") + '\')" style="background:none;border:1px solid #ddd;border-radius:4px;cursor:pointer;color:#c00;font-size:14px;padding:2px 6px" title="Verwijder uit release">&times;</button></td></tr>';
   });
   html += '</tbody></table></div>';
   el.innerHTML = html;
+}
+
+async function removeFromRelease(relId, fileId, fileName) {
+  if (!confirm('Verwijder "' + fileName + '" uit deze release?')) return;
+  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  try {
+    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files/' + fileId, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tcToken }
+    });
+    if (!resp.ok) { alert('Verwijderen mislukt: ' + resp.status); return; }
+    await fetchReleases();
+    docs.forEach(function(d) { d._releases = (releaseMap[d._vid]||[]).join(', '); });
+    toonReleaseDetail(relId);
+  } catch(e) {
+    alert('Fout bij verwijderen: ' + e.message);
+  }
 }
 
 function exportReleaseCSV(relId) {
