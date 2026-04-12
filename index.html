@@ -370,7 +370,7 @@ var colWidths = {}; // { key: 'px waarde' }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
-var COL_CONFIG_VERSION = 4; // Verhoog bij structurele wijzigingen
+var COL_CONFIG_VERSION = 5; // Verhoog bij structurele wijzigingen
 function loadColConfig() {
   try {
     var raw = localStorage.getItem(getColConfigKey());
