@@ -266,7 +266,7 @@ td a:hover{text-decoration:underline}
       <span id="bulkStatus" style="font-size:11px;color:#888"></span>
     </div>
     <div class="tbl-wrap">
-      <div class="tbl-scrl"><table><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
+      <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
     <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
@@ -1157,9 +1157,14 @@ function removeCustomCol(key) {
 
 function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
+  // Colgroup voor kolombreedte
+  var cg = document.getElementById('tColGroup'); cg.innerHTML = '';
+  var cbCol = document.createElement('col'); cbCol.style.width = '28px'; cg.appendChild(cbCol);
+  COLS.forEach(function(c) { var col = document.createElement('col'); if (colWidths[c.k]) col.style.width = colWidths[c.k]; else if (c.w) col.style.width = c.w; cg.appendChild(col); });
+
   var tr = document.createElement('tr');
   // Checkbox kolom (altijd zichtbaar voor selectie/delen)
-  var thCb = document.createElement('th'); thCb.style.cssText = 'width:28px;max-width:28px;min-width:28px;text-align:center;padding:2px 0;box-sizing:border-box';
+  var thCb = document.createElement('th'); thCb.style.cssText = 'text-align:center;padding:2px 0';
   var cb = document.createElement('input'); cb.type = 'checkbox';
   cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); }); updateSelection(); document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
   thCb.appendChild(cb); tr.appendChild(thCb);
@@ -1309,7 +1314,7 @@ function renderT() {
       if (selDoc===doc) tr.classList.add('sel');
 
       // Checkbox (altijd zichtbaar)
-      var tdCb = document.createElement('td'); tdCb.style.cssText = 'width:28px;max-width:28px;min-width:28px;text-align:center;padding:2px 0;box-sizing:border-box';
+      var tdCb = document.createElement('td'); tdCb.style.cssText = 'text-align:center;padding:2px 0';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
       cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
       cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
