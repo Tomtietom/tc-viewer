@@ -1159,7 +1159,7 @@ function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
   // Colgroup voor kolombreedte
   var cg = document.getElementById('tColGroup'); cg.innerHTML = '';
-  var cbCol = document.createElement('col'); cbCol.style.width = '28px'; cg.appendChild(cbCol);
+  var cbCol = document.createElement('col'); cbCol.style.width = '36px'; cg.appendChild(cbCol);
   COLS.forEach(function(c) { var col = document.createElement('col'); if (colWidths[c.k]) col.style.width = colWidths[c.k]; else if (c.w) col.style.width = c.w; cg.appendChild(col); });
 
   var tr = document.createElement('tr');
