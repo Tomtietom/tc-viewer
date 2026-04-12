@@ -1633,6 +1633,20 @@ function exportCSV() {
 }
 
 // === ZIP DOWNLOAD ===
+function shortPath(loc) {
+  if (!loc || loc === '(root)') return '';
+  return loc.split('/').map(function(seg) {
+    seg = seg.trim();
+    var m = seg.match(/^([A-Za-z0-9]+\.?\d*\.?\d*)\s*[-.]?\s*(.*)/);
+    if (!m) return seg.replace(/[^a-zA-Z0-9._-]/g, '');
+    var num = m[1].replace(/\.$/, '');
+    var rest = m[2].trim();
+    if (!rest) return num;
+    var label = rest.split(/[\s/\\()\[\]]+/)[0].replace(/[^a-zA-Z0-9._-]/g, '');
+    return num + '-' + label;
+  }).join('_');
+}
+
 async function downloadZIP() {
   var filtered = filt();
   if (!filtered.length) { alert('Geen documenten om te downloaden'); return; }
@@ -1660,10 +1674,8 @@ async function downloadZIP() {
       var resp = await fetch(dlData.url);
       if (!resp.ok) { failed++; continue; }
       var blob = await resp.blob();
-      // Mapstructuur op basis van actieve groepering
-      var groepVeld = document.getElementById('fGroep') ? document.getElementById('fGroep').value : '';
-      var folder = '';
-      if (groepVeld && doc[groepVeld]) folder = doc[groepVeld];
+      // Verkorte mapnaam voor ZIP
+      var folder = shortPath(doc.file_location);
       var path = folder ? folder + '/' + doc.bestandsnaam : doc.bestandsnaam;
       zip.file(path, blob);
       downloaded++;
@@ -1676,7 +1688,7 @@ async function downloadZIP() {
 
   // Voeg documentenlijst CSV toe aan de ZIP
   var csvH = COLS.map(function(c){return c.l;}).concat(['Map']);
-  var csvRows = filtered.map(function(doc) { return COLS.map(function(c){return '"'+(doc[c.k]||'').replace(/"/g,'""')+'"';}).concat(['"'+(doc.file_location||'')+'"']); });
+  var csvRows = filtered.map(function(doc) { return COLS.map(function(c){return '"'+String(doc[c.k]||'').replace(/"/g,'""')+'"';}).concat(['"'+(doc.file_location||'')+'"']); });
   var csvContent = '\ufeff' + [csvH.join(';')].concat(csvRows.map(function(r){return r.join(';');})).join('\n');
   zip.file('_documentenlijst.csv', csvContent);
 
