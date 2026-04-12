@@ -122,12 +122,12 @@ thead th.sorted .sa{opacity:1;color:var(--af)}
 tbody tr{border-bottom:1px solid #f0f0f0;transition:background .1s;cursor:pointer}
 tbody tr:hover{background:var(--afl)}
 tbody tr.sel{background:#fff3e0}
-tbody tr.mn1{background:#FFC000}
-tbody tr.mn1 td{font-weight:700;font-size:13px;border-bottom:2px solid #d4a000;color:#553600;padding:8px 10px}
-tbody tr.mn2{background:#FFFF00}
-tbody tr.mn2 td{font-weight:600;font-size:12px;border-bottom:1px solid #d4d400;color:#555500}
-tbody tr.mn3{background:#FFF8E1}
-tbody tr.mn3 td{font-weight:500;font-size:11px;color:#8B7500;border-bottom:1px solid #f0e8c0}
+tbody tr.mn1{background:#F5A623}
+tbody tr.mn1 td{font-weight:700;font-size:13px;border-bottom:2px solid #d4821a;color:#fff;padding:8px 10px}
+tbody tr.mn2{background:#FBCC6A}
+tbody tr.mn2 td{font-weight:600;font-size:12px;border-bottom:1px solid #e6a930;color:#5a3e00}
+tbody tr.mn3{background:#FFF0D4}
+tbody tr.mn3 td{font-weight:500;font-size:11px;color:#8B6914;border-bottom:1px solid #f0ddb0}
 tbody tr.mn-meta{background:#f0ebe5}
 tbody tr.mn-meta td{font-weight:700;font-size:12px;border-bottom:2px solid #d4c8b0;color:#555;padding:8px 10px}
 td{padding:6px 8px;vertical-align:top}
@@ -186,7 +186,7 @@ td a:hover{text-decoration:underline}
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
   <button class="back-btn" id="relBtn" onclick="toonReleases()" style="display:none">&#128230; Releases</button>
   <button class="action-btn" id="shareBtn" onclick="openShareDialog()" style="display:none">&#128228; Delen</button>
-  <button class="action-btn" id="relAddBtn" onclick="openReleaseDialog()" style="display:none">&#128230; Release</button>
+  <button class="action-btn" id="relAddBtn" onclick="openReleaseDialog()" style="display:none">&#128230; + Release</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
   <button class="action-btn" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
   <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
@@ -1332,14 +1332,16 @@ function renderT() {
         var dl = mp.split('/').filter(function(d){return d;}), niv = Math.min(dl.length, 3);
         mtr.className = 'mn' + niv;
         var td = document.createElement('td'); td.colSpan = COLS.length + 1;
-        td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + (niv===1?'&#128193;':'&#128194;') + ' ' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
+        var grpCb = editMode ? '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">' : '';
+        td.innerHTML = grpCb + '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + (niv===1?'&#128193;':'&#128194;') + ' ' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
       } else {
         mtr.className = 'mn-meta';
         var td = document.createElement('td'); td.colSpan = COLS.length + 1;
+        var grpCb = editMode ? '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">' : '';
         if (groepVeld === 'document_status') {
-          td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + sBdg(mp) + ' <span style="opacity:.5;font-weight:400;margin-left:8px">' + pm[mp].length + ' documenten</span>';
+          td.innerHTML = grpCb + '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + sBdg(mp) + ' <span style="opacity:.5;font-weight:400;margin-left:8px">' + pm[mp].length + ' documenten</span>';
         } else {
-          td.innerHTML = '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
+          td.innerHTML = grpCb + '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
         }
       }
       mtr.appendChild(td); body.appendChild(mtr);
@@ -1347,6 +1349,8 @@ function renderT() {
     pm[mp].forEach(function(doc) {
       var tr = document.createElement('tr');
       tr.className = gid;
+      tr.dataset.grp = gid;
+      tr.dataset.id = doc._vid;
       tr.onclick = function(e) { if (e.target.tagName === 'INPUT') return; if (!editMode) toonDetail(doc); };
       if (selDoc===doc) tr.classList.add('sel');
 
@@ -1540,7 +1544,6 @@ function toonReleaseDetail(relId) {
   html += '<div style="display:flex;gap:8px;margin-bottom:16px">';
   html += '<button class="nav-btn" style="width:auto;padding:8px 20px;font-size:12px" onclick="downloadRelease(\'' + rel.id + '\')">&#128230; Download ZIP + CSV</button>';
   html += '<button class="nav-btn sec" style="width:auto;padding:8px 20px;font-size:12px" onclick="exportReleaseCSV(\'' + rel.id + '\')">&#11015; Alleen CSV</button>';
-  html += '<button class="nav-btn sec" style="width:auto;padding:8px 20px;font-size:12px" onclick="shareRelease(\'' + rel.id + '\')">&#128228; Delen</button>';
   html += '</div>';
 
   // Bestanden tabel
@@ -1732,6 +1735,19 @@ function updateSelection() {
   if (shareBtn) shareBtn.style.display = cnt > 0 ? 'block' : 'none';
   var relAddBtn = document.getElementById('relAddBtn');
   if (relAddBtn) relAddBtn.style.display = cnt > 0 ? 'block' : 'none';
+}
+
+function selectGroup(cb, gid) {
+  var rows = document.querySelectorAll('tr[data-grp="' + gid + '"]');
+  rows.forEach(function(r) {
+    var docId = r.dataset.id;
+    if (!docId) return;
+    if (cb.checked) selectedDocs.add(docId); else selectedDocs.delete(docId);
+    var rowCb = r.querySelector('input[type="checkbox"]');
+    if (rowCb) rowCb.checked = cb.checked;
+    r.classList.toggle('sel', cb.checked);
+  });
+  updateSelection();
 }
 
 // Bulk field change → populate values dropdown
