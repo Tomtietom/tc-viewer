@@ -235,6 +235,7 @@ td a:hover{text-decoration:underline}
           <option value="with">Alleen met metadata</option>
           <option value="without">Alleen zonder metadata</option>
           <option value="incomplete">Verplichte metadata incompleet</option>
+          <option value="recent7d">Recent toegevoegd (7 dagen)</option>
         </select>
         <select id="fRelease" onchange="renderT()" style="font-size:10px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;font-family:Poppins,sans-serif;color:#555;flex:1"></select>
       </div>
@@ -948,6 +949,8 @@ function renderDash() {
   var metaDocs = docs.filter(function(d) { return d.document_status || d.discipline || d.project_fase || d.document_datum; }).length;
   var metaPct = total > 0 ? Math.round(metaDocs / total * 100) : 0;
   var zonderMeta = total - metaDocs;
+  var d7 = new Date(); d7.setDate(d7.getDate() - 7);
+  var recentCnt = docs.filter(function(d) { return d._created && new Date(d._created) >= d7; }).length;
 
   var offset = 0, donutParts = [];
   Object.entries(stCnt).sort(function(a,b) { return b[1]-a[1]; }).forEach(function(e) {
@@ -977,6 +980,7 @@ function renderDash() {
     '<div class="bstat" style="cursor:pointer" onclick="filterEnToon(\'document_status\',\'Definitief\')"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">' + (stCnt['Definitief']||0) + '</div></div>' +
     '<div class="bstat"><div class="lab">Met metadata</div><div class="val" style="color:var(--info)">' + metaPct + '%</div></div>' +
     '<div class="bstat"><div class="lab">Zonder metadata</div><div class="val" style="color:' + (zonderMeta > 0 ? 'var(--warn)' : 'var(--ok)') + '">' + zonderMeta + '</div></div>' +
+    '<div class="bstat" style="cursor:pointer" onclick="toonRecent()"><div class="lab">Nieuw (7d)</div><div class="val" style="color:' + (recentCnt > 0 ? 'var(--af)' : '#888') + '">' + recentCnt + '</div></div>' +
     '</div>' +
     '<div class="dash-grid">' +
     '<div class="dcard"><h3>Status verdeling</h3><div class="donut-wrap"><div class="donut" style="background:'+donutCSS+'"><div class="donut-c">'+stTotal+'</div></div><div class="donut-leg">'+Object.entries(stCnt).sort(function(a,b){return b[1]-a[1]}).map(function(e){return '<div style="cursor:pointer" onclick="filterEnToon(\'document_status\',\''+e[0]+'\')"><span class="dot" style="background:'+(STATUS_KLEUR[e[0]]||'#ccc')+'"></span>'+e[0]+': <b>'+e[1]+'</b></div>';}).join('')+'</div></div></div>' +
@@ -993,6 +997,12 @@ function filterEnToon(filterType, waarde) {
   toonDocs();
   var sel = document.getElementById('fCol_' + filterType);
   if (sel) { sel.value = waarde; renderT(); }
+}
+
+function toonRecent() {
+  toonDocs();
+  document.getElementById('fMetaFilter').value = 'recent7d';
+  renderT();
 }
 
 // === DOCUMENTEN ===
@@ -1290,6 +1300,9 @@ function filt() {
     } else if (metaFilter === 'incomplete') {
       var compleet = VERPLICHT.every(function(k) { return d[k] && d[k].trim && d[k].trim() !== '' && d[k] !== '--'; });
       if (compleet) return false;
+    } else if (metaFilter === 'recent7d') {
+      var d7 = new Date(); d7.setDate(d7.getDate() - 7);
+      if (!d._created || new Date(d._created) < d7) return false;
     }
     if (z) { var parts = []; getCols().forEach(function(c) { parts.push(docVal(d, c.k)); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
