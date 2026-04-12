@@ -1332,12 +1332,12 @@ function renderT() {
         var dl = mp.split('/').filter(function(d){return d;}), niv = Math.min(dl.length, 3);
         mtr.className = 'mn' + niv;
         var td = document.createElement('td'); td.colSpan = COLS.length + 1;
-        var grpCb = editMode ? '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">' : '';
+        var grpCb = '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">';
         td.innerHTML = grpCb + '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + (niv===1?'&#128193;':'&#128194;') + ' ' + mp + ' <span style="opacity:.5;font-weight:400">(' + pm[mp].length + ')</span>';
       } else {
         mtr.className = 'mn-meta';
         var td = document.createElement('td'); td.colSpan = COLS.length + 1;
-        var grpCb = editMode ? '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">' : '';
+        var grpCb = '<input type="checkbox" class="grp-sel" onchange="selectGroup(this,\'' + gid + '\')" style="margin-right:6px;vertical-align:middle" onclick="event.stopPropagation()">';
         if (groepVeld === 'document_status') {
           td.innerHTML = grpCb + '<span class="grp-arrow" style="display:inline-block;width:16px;font-size:10px">\u25BC</span>' + sBdg(mp) + ' <span style="opacity:.5;font-weight:400;margin-left:8px">' + pm[mp].length + ' documenten</span>';
         } else {
