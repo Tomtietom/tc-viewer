@@ -186,6 +186,7 @@ td a:hover{text-decoration:underline}
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
   <button class="back-btn" id="relBtn" onclick="toonReleases()" style="display:none">&#128230; Releases</button>
   <button class="action-btn" id="shareBtn" onclick="openShareDialog()" style="display:none">&#128228; Delen</button>
+  <button class="action-btn" id="relAddBtn" onclick="openReleaseDialog()" style="display:none">&#128230; Release</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
   <button class="action-btn" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
   <button class="action-btn" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
@@ -314,6 +315,42 @@ td a:hover{text-decoration:underline}
         <button class="btn-secondary" onclick="copyShareLink()">&#128203; Kopieer</button>
         <button class="btn-secondary" onclick="openShareInMail()">&#9993; Open in email</button>
         <button class="btn-primary" onclick="closeShareDialog()">Sluiten</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RELEASE MODAL -->
+<div class="modal-bg" id="releaseModal">
+  <div class="modal">
+    <div id="releaseForm">
+      <h3>&#128230; Aan release toevoegen</h3>
+      <div class="file-list" id="releaseFileList"></div>
+      <label>Bestaande release</label>
+      <select id="releaseSelect" onchange="toggleNewRelease()" style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:Poppins,sans-serif">
+        <option value="">Kies een release...</option>
+      </select>
+      <div id="newReleaseFields" style="display:none;margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px">
+        <label>Naam nieuwe release</label>
+        <input type="text" id="releaseName" placeholder="Bijv. Tekeningen UO week 15">
+        <div style="display:flex;gap:12px;margin-top:4px">
+          <div style="flex:1"><label>Deadline</label><input type="date" id="releaseDue"></div>
+          <div style="flex:1"><label>Notities (optioneel)</label><input type="text" id="releaseNotes" placeholder="Korte toelichting"></div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="closeReleaseDialog()">Annuleren</button>
+        <button class="btn-primary" id="releaseSubmitBtn" onclick="submitRelease()">&#128230; Toevoegen</button>
+      </div>
+    </div>
+    <div id="releaseSuccess" style="display:none">
+      <div class="success-box">
+        <div class="ic">&#9989;</div>
+        <h3 id="releaseSuccessTitle">Toegevoegd!</h3>
+        <p id="releaseSuccessMsg" style="font-size:13px;color:#666"></p>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" onclick="closeReleaseDialog()">Sluiten</button>
       </div>
     </div>
   </div>
@@ -1690,9 +1727,11 @@ function updateSelection() {
   document.getElementById('editSelCount').textContent = cnt + ' geselecteerd';
   bar.style.display = (editMode && cnt > 0) ? 'flex' : (editMode ? 'flex' : 'none');
   if (cnt === 0) document.getElementById('editSelCount').textContent = 'Selecteer bestanden om bulk te bewerken';
-  // Delen knop: altijd zichtbaar als bestanden geselecteerd (ongeacht edit mode)
+  // Delen + Release knoppen: zichtbaar als bestanden geselecteerd
   var shareBtn = document.getElementById('shareBtn');
   if (shareBtn) shareBtn.style.display = cnt > 0 ? 'block' : 'none';
+  var relAddBtn = document.getElementById('relAddBtn');
+  if (relAddBtn) relAddBtn.style.display = cnt > 0 ? 'block' : 'none';
 }
 
 // Bulk field change → populate values dropdown
@@ -1979,6 +2018,116 @@ function openShareInMail() {
   var body = (userMsg ? userMsg + '\n\n' : '') + 'Documenten uit ' + projNaam + ':\n\n' + docList + '\n\nVervaldatum: ' + (document.getElementById('shareExpiry').value || 'niet ingesteld');
   var mailto = 'mailto:' + encodeURIComponent(emails) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
   window.open(mailto, '_blank');
+}
+
+// === RELEASE BEHEER ===
+var _releaseDocs = [];
+
+function openReleaseDialog() {
+  var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
+  if (!selDocs.length) { alert('Selecteer eerst bestanden'); return; }
+  _releaseDocs = selDocs;
+  // Bestandslijst
+  var list = document.getElementById('releaseFileList');
+  var namen = selDocs.map(function(d) { return d.bestandsnaam; });
+  list.textContent = namen.length <= 10 ? namen.join('\n') : namen.slice(0, 10).join('\n') + '\n... en ' + (namen.length - 10) + ' meer';
+  // Vul dropdown met open releases
+  var sel = document.getElementById('releaseSelect');
+  sel.innerHTML = '<option value="">Kies een release...</option><option value="__new__">+ Nieuwe release aanmaken</option>';
+  releases.filter(function(r) { return r.status !== 'SENT'; }).forEach(function(r) {
+    var o = document.createElement('option'); o.value = r.id; o.textContent = r.name + ' (' + r.filesCount + ' bestanden)'; sel.appendChild(o);
+  });
+  sel.value = '';
+  document.getElementById('newReleaseFields').style.display = 'none';
+  var defDue = new Date(); defDue.setDate(defDue.getDate() + 14);
+  document.getElementById('releaseDue').value = defDue.toISOString().split('T')[0];
+  document.getElementById('releaseName').value = '';
+  document.getElementById('releaseNotes').value = '';
+  document.getElementById('releaseForm').style.display = '';
+  document.getElementById('releaseSuccess').style.display = 'none';
+  document.getElementById('releaseModal').classList.add('vis');
+}
+
+function toggleNewRelease() {
+  var val = document.getElementById('releaseSelect').value;
+  document.getElementById('newReleaseFields').style.display = val === '__new__' ? 'block' : 'none';
+  document.getElementById('releaseSubmitBtn').textContent = val === '__new__' ? '📦 Aanmaken + toevoegen' : '📦 Toevoegen';
+}
+
+function closeReleaseDialog() {
+  document.getElementById('releaseModal').classList.remove('vis');
+}
+
+async function submitRelease() {
+  var selVal = document.getElementById('releaseSelect').value;
+  if (!selVal) { alert('Kies een release of maak een nieuwe aan'); return; }
+
+  var btn = document.getElementById('releaseSubmitBtn');
+  btn.disabled = true; btn.textContent = '⏳ Bezig...';
+  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  var relId = selVal;
+  var relName = '';
+
+  try {
+    // Nieuwe release aanmaken als nodig
+    if (selVal === '__new__') {
+      var name = document.getElementById('releaseName').value.trim();
+      var due = document.getElementById('releaseDue').value;
+      if (!name) { alert('Vul een naam in voor de release'); btn.disabled = false; btn.textContent = '📦 Aanmaken + toevoegen'; return; }
+      if (!due) { alert('Vul een deadline in'); btn.disabled = false; btn.textContent = '📦 Aanmaken + toevoegen'; return; }
+
+      var createBody = { name: name, dueDate: due + 'T23:59:00+0000', projectId: pid };
+      var notes = document.getElementById('releaseNotes').value.trim();
+      if (notes) createBody.notes = notes;
+
+      var createResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(createBody)
+      });
+      if (!createResp.ok) { var err = await createResp.text(); throw new Error('Release aanmaken mislukt: ' + err); }
+      var createResult = await createResp.json();
+      relId = createResult.id;
+      relName = name;
+      console.log('[Release] Nieuwe release aangemaakt:', relId, name);
+    } else {
+      var existingRel = releases.find(function(r) { return r.id === selVal; });
+      relName = existingRel ? existingRel.name : '';
+    }
+
+    // Bestanden toevoegen aan release
+    var fileItems = _releaseDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; });
+    var addResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(fileItems)
+    });
+    if (!addResp.ok) { var err2 = await addResp.text(); throw new Error('Bestanden toevoegen mislukt: ' + err2); }
+    console.log('[Release] ' + _releaseDocs.length + ' bestanden toegevoegd aan release ' + relName);
+
+    // Update lokale data
+    _releaseDocs.forEach(function(d) {
+      if (!releaseMap[d._vid]) releaseMap[d._vid] = [];
+      if (releaseMap[d._vid].indexOf(relName) === -1) releaseMap[d._vid].push(relName);
+      d._releases = releaseMap[d._vid].join(', ');
+    });
+    // Herlaad releases voor volledig overzicht
+    try { await fetchReleases(); } catch(e) {}
+
+    // Toon succes
+    document.getElementById('releaseForm').style.display = 'none';
+    document.getElementById('releaseSuccess').style.display = '';
+    document.getElementById('releaseSuccessTitle').textContent = selVal === '__new__' ? 'Release aangemaakt!' : 'Toegevoegd!';
+    document.getElementById('releaseSuccessMsg').textContent = _releaseDocs.length + ' bestanden toegevoegd aan "' + relName + '"';
+
+    // Herrender tabel
+    renderT();
+  } catch(e) {
+    console.error('[Release] Fout:', e);
+    alert(e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '📦 Toevoegen';
 }
 
 // === START ===
