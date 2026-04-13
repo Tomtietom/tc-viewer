@@ -1781,6 +1781,16 @@ function updateSelection() {
   if (shareBtn) shareBtn.style.display = cnt > 0 ? 'block' : 'none';
   var relAddBtn = document.getElementById('relAddBtn');
   if (relAddBtn) relAddBtn.style.display = cnt > 0 ? 'block' : 'none';
+  // Footer teller bijwerken met selectie
+  var ftr = document.getElementById('ftr1');
+  if (ftr) {
+    if (cnt > 0) {
+      ftr.textContent = cnt + ' geselecteerd van ' + docs.length + ' documenten';
+    } else {
+      var filtered = filt();
+      ftr.textContent = filtered.length + ' van ' + docs.length + ' documenten';
+    }
+  }
 }
 
 function selectGroup(cb, gid) {
