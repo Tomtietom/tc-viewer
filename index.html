@@ -1583,9 +1583,10 @@ async function removeFromRelease(relId, fileId, fileName) {
   if (!confirm('Verwijder "' + fileName + '" uit deze release?')) return;
   var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
   try {
-    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files/' + fileId, {
+    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files', {
       method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + tcToken }
+      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ id: fileId, type: 'FILE' }])
     });
     if (!resp.ok) { alert('Verwijderen mislukt: ' + resp.status); return; }
     await fetchReleases();
@@ -1679,9 +1680,11 @@ function shortPath(loc) {
 }
 
 async function downloadZIP() {
-  var filtered = filt();
+  var allFiltered = filt();
+  var filtered = selectedDocs.size > 0 ? allFiltered.filter(function(d) { return selectedDocs.has(d._vid); }) : allFiltered;
   if (!filtered.length) { alert('Geen documenten om te downloaden'); return; }
-  if (!confirm('Download ' + filtered.length + ' bestanden als ZIP?\n\nDit kan even duren bij grote bestanden.')) return;
+  var label = selectedDocs.size > 0 ? filtered.length + ' geselecteerde bestanden' : filtered.length + ' bestanden';
+  if (!confirm('Download ' + label + ' als ZIP?\n\nDit kan even duren bij grote bestanden.')) return;
 
   var zipBtn = document.getElementById('zipBtn');
   zipBtn.textContent = '⏳ 0/' + filtered.length;
