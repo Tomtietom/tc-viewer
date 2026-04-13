@@ -2022,8 +2022,15 @@ async function sendShare(method) {
         // Haal stoken uit /s/{stoken}
         var stoken = sObj.url.replace(/^\/s\//, '');
         if (shareMode === 'PUBLIC') {
-          // Publieke link via eigen download-proxy (geen login nodig)
-          sUrl = PROXY_BASE + '/download/' + tcRegion + '/' + stoken + (perm === 'VIEW' ? '?view=1' : '');
+          var ext = (_lastShareDocs[si].bestandsnaam||'').split('.').pop().toLowerCase();
+          var viewableExts = ['pdf','png','jpg','jpeg','gif','svg','bmp','webp'];
+          if (perm === 'VIEW' && viewableExts.indexOf(ext) < 0) {
+            // Niet-viewbaar bestand (IFC, DWG etc.) → TC viewer (vereist login)
+            sUrl = 'https://web.connect.trimble.com' + sObj.url;
+          } else {
+            // Viewbaar of download → eigen proxy (geen login nodig)
+            sUrl = PROXY_BASE + '/download/' + tcRegion + '/' + stoken + (perm === 'VIEW' ? '?view=1' : '');
+          }
         } else {
           // TC link (vereist Trimble ID login)
           sUrl = 'https://web.connect.trimble.com' + sObj.url;
