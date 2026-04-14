@@ -1658,7 +1658,7 @@ async function downloadRelease(relId) {
 
 function exportCSV() {
   var d = filt(), h = COLS.map(function(c){return c.l;}).concat(['Map']);
-  var rows = d.map(function(doc) { return COLS.map(function(c){return '"'+(doc[c.k]||'').replace(/"/g,'""')+'"';}).concat(['"'+(doc.file_location||'')+'"']); });
+  var rows = d.map(function(doc) { return COLS.map(function(c){return '"'+String(doc[c.k]||'').replace(/"/g,'""')+'"';}).concat(['"'+(doc.file_location||'')+'"']); });
   var csv = [h.join(';')].concat(rows.map(function(r){return r.join(';');})).join('\n');
   var blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8;'});
   var a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='documentenlijst.csv'; a.click();
@@ -1861,7 +1861,9 @@ async function bulkSave() {
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: changeItems })
     });
-    if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
+    var respBody = await resp.text();
+    console.log('[TC] Bulk changeset response:', resp.status, respBody);
+    if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     toSave.forEach(function(doc) { doc[field] = value; });
     saved = toSave.length;
   } catch(e) {
@@ -1878,18 +1880,21 @@ async function bulkSave() {
 async function saveCell(doc, field, value) {
   var propId = null;
   for (var id in PROP_MAP) { if (PROP_MAP[id] === field) { propId = id; break; } }
-  if (!propId) return;
+  if (!propId) { console.warn('[TC] Geen UUID gevonden voor veld:', field, '| PROP_MAP keys:', Object.keys(PROP_MAP).length); return; }
 
   var libId = 'tcproject:prod:' + pid;
   var props = {}; props[propId] = value;
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
+  console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Link:', link);
   try {
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: [{ link: link, libId: libId, defId: 'tcfiles', props: props }] })
     });
-    if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
+    var respBody = await resp.text();
+    console.log('[TC] Changeset response:', resp.status, respBody);
+    if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
   } catch(e) {
