@@ -231,6 +231,10 @@ td a:hover{text-decoration:underline}
     <div class="sb-sec">
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div id="filterRows"></div>
+      <div id="extFilterWrap" style="margin-top:6px;display:none">
+        <div style="font-size:10px;color:#888;margin-bottom:3px">Extensies uitsluiten <span style="opacity:.6">(klik om weg te filteren)</span></div>
+        <div id="extChips" style="display:flex;flex-wrap:wrap;gap:3px"></div>
+      </div>
       <div class="frow" style="margin-top:6px">
         <select id="fMetaFilter" onchange="renderT()" style="font-size:10px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;font-family:Poppins,sans-serif;color:#555;flex:1">
           <option value="">Alle documenten</option>
@@ -1059,6 +1063,48 @@ function toonDocs() {
 
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
 var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','_gedeeld','titel'];
+var excludedExts = new Set();
+
+function getExt(naam) {
+  var n = (naam || '').toLowerCase();
+  var i = n.lastIndexOf('.');
+  if (i <= 0 || i >= n.length - 1) return '';
+  var e = n.slice(i + 1);
+  // Negeer extensies met spaties of rare tekens (waarschijnlijk geen echte extensie)
+  if (!/^[a-z0-9]{1,6}$/.test(e)) return '';
+  return e;
+}
+
+function vulExtChips() {
+  var counts = {};
+  docs.forEach(function(d) {
+    var e = getExt(d.bestandsnaam);
+    if (e) counts[e] = (counts[e] || 0) + 1;
+  });
+  var keys = Object.keys(counts).sort(function(a, b) { return counts[b] - counts[a] || a.localeCompare(b); });
+  var wrap = document.getElementById('extFilterWrap');
+  var c = document.getElementById('extChips');
+  if (!c || !wrap) return;
+  if (!keys.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  // Ruim stale excludes op (extensies die niet meer bestaan)
+  Array.from(excludedExts).forEach(function(e) { if (!counts[e]) excludedExts.delete(e); });
+  c.innerHTML = keys.map(function(e) {
+    var excl = excludedExts.has(e);
+    var style = 'cursor:pointer;font-size:10px;padding:2px 7px;border-radius:10px;font-family:Poppins,sans-serif;user-select:none;'
+      + 'border:1px solid ' + (excl ? '#d66' : '#ddd') + ';'
+      + 'background:' + (excl ? '#fdecec' : '#fff') + ';'
+      + 'color:' + (excl ? '#d66' : '#555') + ';'
+      + 'text-decoration:' + (excl ? 'line-through' : 'none') + ';';
+    return '<span onclick="toggleExt(\'' + e + '\')" style="' + style + '" title="' + counts[e] + ' bestanden — klik om ' + (excl ? 'weer te tonen' : 'uit te sluiten') + '">.' + e + ' <span style="opacity:.55">' + counts[e] + '</span></span>';
+  }).join('');
+}
+
+function toggleExt(e) {
+  if (excludedExts.has(e)) excludedExts.delete(e); else excludedExts.add(e);
+  vulExtChips();
+  renderT();
+}
 function getFilterableCols() {
   return getCols().filter(function(c) { return SKIP_FILTER.indexOf(c.k) === -1; });
 }
@@ -1116,6 +1162,8 @@ function vulFilters() {
     });
     relSel.value = curRel;
   }
+
+  vulExtChips();
 }
 
 function bouwBoom() {
@@ -1303,6 +1351,8 @@ function resetFilters() {
   document.getElementById('fGroep').value = '';
   var mf = document.getElementById('fMetaFilter'); if (mf) mf.value = '';
   var rf = document.getElementById('fRelease'); if (rf) rf.value = '';
+  excludedExts.clear();
+  vulExtChips();
   actMap = null;
   document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
   var alle = document.querySelector('.tr-row'); if (alle) alle.classList.add('act');
@@ -1321,6 +1371,10 @@ function filt() {
   });
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
+    if (excludedExts.size) {
+      var e = getExt(d.bestandsnaam);
+      if (e && excludedExts.has(e)) return false;
+    }
     for (var i = 0; i < activeFilters.length; i++) {
       if (docVal(d, activeFilters[i].k) !== activeFilters[i].v) return false;
     }
