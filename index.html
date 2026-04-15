@@ -6,6 +6,7 @@
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<!-- At Fielt Extension Hub — NIET VERWIJDEREN (zie atfielt-extension-hub/HUB-INTEGRATION.md) -->
 <script src="https://atfielt-extension-hub.tom-da0.workers.dev/client.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
@@ -692,67 +693,26 @@ async function tcAutoFetchData() {
 
     console.log('[TC] Token OK, lengte:', tcToken.length);
 
-    // ============================================================
-    //  At Fielt Extension Hub — toegangscontrole
-    // ============================================================
-    var hubEmail = null;
-    // Poging 1: /users/me via Trimble REST API
-    try {
-      var me = await tcFetch('/users/me');
-      console.log('[Hub] /users/me keys:', Object.keys(me || {}));
-      hubEmail = me && (me.email || me.emailAddress || me.mail) || null;
-      if (hubEmail) console.log('[Hub] Email via /users/me:', hubEmail);
-    } catch(e) { console.warn('[Hub] /users/me faalde:', e.message); }
-
-    // Poging 2: JWT payload
-    if (!hubEmail) {
-      try {
-        var parts = tcToken.split('.');
-        if (parts.length === 3) {
-          var base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-          var padded = base64 + '==='.slice((base64.length + 3) % 4);
-          var payload = JSON.parse(atob(padded));
-          console.log('[Hub] JWT keys:', Object.keys(payload));
-          hubEmail = payload.email || payload.upn || payload.preferred_username ||
-                     payload.unique_name || payload.user_name || payload.nameid || null;
-          if (!hubEmail && payload.sub && payload.sub.indexOf('@') >= 0) hubEmail = payload.sub;
-        }
-      } catch(e) { console.warn('[Hub] JWT decode faalde:', e.message); }
-    }
-
-    // Fail-closed: geen hub client
+    // ╔══════════════════════════════════════════════════════════╗
+    // ║  AT FIELT EXTENSION HUB — NIET VERWIJDEREN               ║
+    // ║  Toegangscontrole + usage tracking via hub.              ║
+    // ║  Referentie: atfielt-extension-hub/HUB-INTEGRATION.md    ║
+    // ║  Als je dit blok weghaalt is de extensie niet beschermd  ║
+    // ║  en verschijnt er niks in het admin dashboard.           ║
+    // ╚══════════════════════════════════════════════════════════╝
     if (!window.atfieltHub) {
-      console.error('[Hub] client.js niet geladen');
-      document.body.innerHTML =
-        '<div style="position:fixed;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">' +
-        '<div style="max-width:480px;padding:40px;text-align:center;border:2px solid #d4821a;border-radius:12px;background:#fef5eb;">' +
-        '<h1 style="margin:0 0 16px;color:#222;">Laadfout</h1>' +
-        '<p style="margin:0 0 20px;color:#444;">At Fielt Hub kon niet geladen worden. Controleer je internetverbinding en herlaad.</p>' +
-        '<p style="margin:0;color:#666;font-size:14px;">Contact: <a href="mailto:info@atfielt.nl" style="color:#d4821a;">info@atfielt.nl</a></p>' +
-        '</div></div>';
+      document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif;">At Fielt Hub kon niet geladen worden. Controleer je internetverbinding en herlaad.<br><br><a href="mailto:info@atfielt.nl">info@atfielt.nl</a></div>';
       throw new Error('Hub client niet geladen');
     }
-
-    // Fail-closed: geen email
-    if (!hubEmail) {
-      window.atfieltHub.showBlockScreen('Kon gebruikers-email niet uit Trimble lezen. Herlaad de extensie of neem contact op met At Fielt.');
-      throw new Error('Hub: geen email gevonden');
-    }
-
-    // Hub context + auth call
-    window.atfieltTcContext = {
-      userEmail: hubEmail,
-      projectId: tcProject && tcProject.id || null,
-      projectName: tcProject && tcProject.name || null,
-      projectRegion: tcProject && tcProject.location || null,
-    };
-    var hubResult = await window.atfieltHub.auth('documentenlijst');
-    if (!hubResult.allowed) {
-      window.atfieltHub.showBlockScreen(hubResult.reason || 'Geen toegang tot deze extensie.');
-      throw new Error('Hub: toegang geweigerd — ' + (hubResult.reason || 'onbekend'));
-    }
-    console.log('[Hub] Toegang verleend voor', hubEmail);
-    // ============================================================
+    await window.atfieltHub.check({
+      slug: 'documentenlijst',
+      tcToken: tcToken,
+      tcProject: tcProject,
+      apiBase: TC_BASE,
+    });
+    // ╔══════════════════════════════════════════════════════════╗
+    // ║  EINDE AT FIELT HUB BLOK                                 ║
+    // ╚══════════════════════════════════════════════════════════╝
 
     tcStep(1, 'done', 'Verbonden met ' + (tcProject.name || 'project'));
 
@@ -801,7 +761,7 @@ async function tcAutoFetchData() {
     renderDash();
     toonDocs();
 
-    // Hub: log successful load met stats
+    // [HUB] logEvent — niet verwijderen
     if (window.atfieltHub) {
       window.atfieltHub.logEvent('feature', {
         action: 'data-loaded',
@@ -809,6 +769,7 @@ async function tcAutoFetchData() {
         releases: (releases || []).length,
       });
     }
+    // [HUB] einde
 
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
