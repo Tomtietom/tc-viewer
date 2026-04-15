@@ -232,7 +232,7 @@ td a:hover{text-decoration:underline}
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div id="filterRows"></div>
       <div id="extFilterWrap" style="margin-top:6px;display:none">
-        <div style="font-size:10px;color:#888;margin-bottom:3px">Extensies uitsluiten <span style="opacity:.6">(klik om weg te filteren)</span></div>
+        <div style="font-size:10px;color:#888;margin-bottom:3px">Bestandstype <span style="opacity:.6">(klik om alleen deze te tonen)</span></div>
         <div id="extChips" style="display:flex;flex-wrap:wrap;gap:3px"></div>
       </div>
       <div class="frow" style="margin-top:6px">
@@ -1063,7 +1063,7 @@ function toonDocs() {
 
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
 var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','_gedeeld','titel'];
-var excludedExts = new Set();
+var includedExts = new Set();
 
 function getExt(naam) {
   var n = (naam || '').toLowerCase();
@@ -1087,21 +1087,21 @@ function vulExtChips() {
   if (!c || !wrap) return;
   if (!keys.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
-  // Ruim stale excludes op (extensies die niet meer bestaan)
-  Array.from(excludedExts).forEach(function(e) { if (!counts[e]) excludedExts.delete(e); });
+  // Ruim stale selecties op (extensies die niet meer bestaan)
+  Array.from(includedExts).forEach(function(e) { if (!counts[e]) includedExts.delete(e); });
   c.innerHTML = keys.map(function(e) {
-    var excl = excludedExts.has(e);
+    var sel = includedExts.has(e);
     var style = 'cursor:pointer;font-size:10px;padding:2px 7px;border-radius:10px;font-family:Poppins,sans-serif;user-select:none;'
-      + 'border:1px solid ' + (excl ? '#d66' : '#ddd') + ';'
-      + 'background:' + (excl ? '#fdecec' : '#fff') + ';'
-      + 'color:' + (excl ? '#d66' : '#555') + ';'
-      + 'text-decoration:' + (excl ? 'line-through' : 'none') + ';';
-    return '<span onclick="toggleExt(\'' + e + '\')" style="' + style + '" title="' + counts[e] + ' bestanden — klik om ' + (excl ? 'weer te tonen' : 'uit te sluiten') + '">.' + e + ' <span style="opacity:.55">' + counts[e] + '</span></span>';
+      + 'border:1px solid ' + (sel ? 'var(--af)' : '#ddd') + ';'
+      + 'background:' + (sel ? 'var(--af)' : '#fff') + ';'
+      + 'color:' + (sel ? '#fff' : '#555') + ';'
+      + 'font-weight:' + (sel ? '600' : '400') + ';';
+    return '<span onclick="toggleExt(\'' + e + '\')" style="' + style + '" title="' + counts[e] + ' bestanden — klik om ' + (sel ? 'deselecteren' : 'alleen deze te tonen') + '">.' + e + ' <span style="opacity:.7">' + counts[e] + '</span></span>';
   }).join('');
 }
 
 function toggleExt(e) {
-  if (excludedExts.has(e)) excludedExts.delete(e); else excludedExts.add(e);
+  if (includedExts.has(e)) includedExts.delete(e); else includedExts.add(e);
   vulExtChips();
   renderT();
 }
@@ -1351,7 +1351,7 @@ function resetFilters() {
   document.getElementById('fGroep').value = '';
   var mf = document.getElementById('fMetaFilter'); if (mf) mf.value = '';
   var rf = document.getElementById('fRelease'); if (rf) rf.value = '';
-  excludedExts.clear();
+  includedExts.clear();
   vulExtChips();
   actMap = null;
   document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
@@ -1371,9 +1371,9 @@ function filt() {
   });
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
-    if (excludedExts.size) {
+    if (includedExts.size) {
       var e = getExt(d.bestandsnaam);
-      if (e && excludedExts.has(e)) return false;
+      if (!e || !includedExts.has(e)) return false;
     }
     for (var i = 0; i < activeFilters.length; i++) {
       if (docVal(d, activeFilters[i].k) !== activeFilters[i].v) return false;
