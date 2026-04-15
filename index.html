@@ -6,6 +6,7 @@
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<script src="https://atfielt-extension-hub.tom-da0.workers.dev/client.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -690,6 +691,69 @@ async function tcAutoFetchData() {
     }
 
     console.log('[TC] Token OK, lengte:', tcToken.length);
+
+    // ============================================================
+    //  At Fielt Extension Hub — toegangscontrole
+    // ============================================================
+    var hubEmail = null;
+    // Poging 1: /users/me via Trimble REST API
+    try {
+      var me = await tcFetch('/users/me');
+      console.log('[Hub] /users/me keys:', Object.keys(me || {}));
+      hubEmail = me && (me.email || me.emailAddress || me.mail) || null;
+      if (hubEmail) console.log('[Hub] Email via /users/me:', hubEmail);
+    } catch(e) { console.warn('[Hub] /users/me faalde:', e.message); }
+
+    // Poging 2: JWT payload
+    if (!hubEmail) {
+      try {
+        var parts = tcToken.split('.');
+        if (parts.length === 3) {
+          var base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          var padded = base64 + '==='.slice((base64.length + 3) % 4);
+          var payload = JSON.parse(atob(padded));
+          console.log('[Hub] JWT keys:', Object.keys(payload));
+          hubEmail = payload.email || payload.upn || payload.preferred_username ||
+                     payload.unique_name || payload.user_name || payload.nameid || null;
+          if (!hubEmail && payload.sub && payload.sub.indexOf('@') >= 0) hubEmail = payload.sub;
+        }
+      } catch(e) { console.warn('[Hub] JWT decode faalde:', e.message); }
+    }
+
+    // Fail-closed: geen hub client
+    if (!window.atfieltHub) {
+      console.error('[Hub] client.js niet geladen');
+      document.body.innerHTML =
+        '<div style="position:fixed;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;font-family:sans-serif;">' +
+        '<div style="max-width:480px;padding:40px;text-align:center;border:2px solid #d4821a;border-radius:12px;background:#fef5eb;">' +
+        '<h1 style="margin:0 0 16px;color:#222;">Laadfout</h1>' +
+        '<p style="margin:0 0 20px;color:#444;">At Fielt Hub kon niet geladen worden. Controleer je internetverbinding en herlaad.</p>' +
+        '<p style="margin:0;color:#666;font-size:14px;">Contact: <a href="mailto:info@atfielt.nl" style="color:#d4821a;">info@atfielt.nl</a></p>' +
+        '</div></div>';
+      throw new Error('Hub client niet geladen');
+    }
+
+    // Fail-closed: geen email
+    if (!hubEmail) {
+      window.atfieltHub.showBlockScreen('Kon gebruikers-email niet uit Trimble lezen. Herlaad de extensie of neem contact op met At Fielt.');
+      throw new Error('Hub: geen email gevonden');
+    }
+
+    // Hub context + auth call
+    window.atfieltTcContext = {
+      userEmail: hubEmail,
+      projectId: tcProject && tcProject.id || null,
+      projectName: tcProject && tcProject.name || null,
+      projectRegion: tcProject && tcProject.location || null,
+    };
+    var hubResult = await window.atfieltHub.auth('documentenlijst');
+    if (!hubResult.allowed) {
+      window.atfieltHub.showBlockScreen(hubResult.reason || 'Geen toegang tot deze extensie.');
+      throw new Error('Hub: toegang geweigerd — ' + (hubResult.reason || 'onbekend'));
+    }
+    console.log('[Hub] Toegang verleend voor', hubEmail);
+    // ============================================================
+
     tcStep(1, 'done', 'Verbonden met ' + (tcProject.name || 'project'));
 
     // === MAPPEN + BESTANDEN OPHALEN ===
@@ -736,6 +800,15 @@ async function tcAutoFetchData() {
     console.log('[TC] Documentenlijst tonen, docs:', docs.length);
     renderDash();
     toonDocs();
+
+    // Hub: log successful load met stats
+    if (window.atfieltHub) {
+      window.atfieltHub.logEvent('feature', {
+        action: 'data-loaded',
+        docs: docs.length,
+        releases: (releases || []).length,
+      });
+    }
 
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
@@ -1395,14 +1468,14 @@ function renderT() {
             var sel = document.createElement('select');
             sel.style.cssText = 'width:100%;padding:2px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif';
             ENUM_VALUES[c.k].forEach(function(opt) { var o = document.createElement('option'); o.value = opt; o.textContent = opt; if (opt === v) o.selected = true; sel.appendChild(o); });
-            sel.onchange = function(e) { e.stopPropagation(); sel.style.borderColor = 'var(--af)'; saveCell(doc, c.k, sel.value); };
+            sel.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, sel.value, sel); };
             td.appendChild(sel);
           } else {
             // Text input
             var inp = document.createElement('input'); inp.type = c.k === 'document_datum' ? 'date' : 'text';
             inp.value = v;
             inp.style.cssText = 'width:100%;padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif;box-sizing:border-box';
-            inp.onchange = function(e) { e.stopPropagation(); inp.style.borderColor = 'var(--af)'; saveCell(doc, c.k, inp.value); };
+            inp.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, inp.value, inp); };
             inp.onclick = function(e) { e.stopPropagation(); };
             td.appendChild(inp);
           }
@@ -1860,7 +1933,8 @@ async function bulkSave() {
     return { link: doc._psetLink || 'frn:tcfile:' + doc._vid, libId: libId, defId: 'tcfiles', props: props };
   });
   statusEl.textContent = 'Opslaan: ' + toSave.length + ' bestanden...';
-  var saved = 0;
+  statusEl.style.color = '#D4821A';
+  var saved = 0, saveError = null;
   try {
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
@@ -1874,16 +1948,23 @@ async function bulkSave() {
     saved = toSave.length;
   } catch(e) {
     console.warn('[TC] Bulk opslaan mislukt:', e.message);
+    saveError = e.message;
     alert('Opslaan mislukt: ' + e.message);
   }
-  statusEl.textContent = saved + ' bestanden opgeslagen';
+  if (saveError) {
+    statusEl.textContent = 'Fout: ' + saveError;
+    statusEl.style.color = '#ef4444';
+  } else {
+    statusEl.textContent = '\u2713 ' + saved + ' bestanden opgeslagen';
+    statusEl.style.color = '#22c55e';
+  }
   selectedDocs.clear();
   updateSelection();
   renderT();
-  setTimeout(function() { statusEl.textContent = ''; }, 3000);
+  setTimeout(function() { statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
 }
 
-async function saveCell(doc, field, value) {
+async function saveCell(doc, field, value, el) {
   var propId = null;
   for (var id in PROP_MAP) { if (PROP_MAP[id] === field) { propId = id; break; } }
   if (!propId) { console.warn('[TC] Geen UUID gevonden voor veld:', field, '| PROP_MAP keys:', Object.keys(PROP_MAP).length); return; }
@@ -1898,6 +1979,8 @@ async function saveCell(doc, field, value) {
   }
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
   console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Alle props:', Object.keys(props).length, '| Link:', link);
+  // Visuele feedback: bezig = oranje
+  if (el) { el.style.borderColor = '#D4821A'; el.style.background = '#FFF8E1'; }
   try {
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
@@ -1909,8 +1992,16 @@ async function saveCell(doc, field, value) {
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
+    // Visuele feedback: succes = groen, na 1.5s terug naar normaal
+    if (el) {
+      el.style.borderColor = '#22c55e';
+      el.style.background = '#f0fdf4';
+      setTimeout(function() { el.style.borderColor = '#ddd'; el.style.background = ''; }, 1500);
+    }
   } catch(e) {
     console.warn('[TC] Opslaan mislukt:', e.message);
+    // Visuele feedback: fout = rood
+    if (el) { el.style.borderColor = '#ef4444'; el.style.background = '#fef2f2'; }
     alert('Opslaan mislukt: ' + e.message);
   }
 }
