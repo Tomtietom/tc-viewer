@@ -1850,7 +1850,13 @@ async function bulkSave() {
   var libId = 'tcproject:prod:' + pid;
   // Bouw één changeset voor alle bestanden (max 500 per batch)
   var changeItems = toSave.map(function(doc) {
-    var props = {}; props[propId] = value;
+    // Stuur ALLE bestaande props mee (PSet API vervangt, merged niet)
+    var props = {};
+    for (var id in PROP_MAP) {
+      var fn = PROP_MAP[id];
+      if (fn === field) { props[id] = value; }
+      else if (doc[fn]) { props[id] = doc[fn]; }
+    }
     return { link: doc._psetLink || 'frn:tcfile:' + doc._vid, libId: libId, defId: 'tcfiles', props: props };
   });
   statusEl.textContent = 'Opslaan: ' + toSave.length + ' bestanden...';
@@ -1883,9 +1889,15 @@ async function saveCell(doc, field, value) {
   if (!propId) { console.warn('[TC] Geen UUID gevonden voor veld:', field, '| PROP_MAP keys:', Object.keys(PROP_MAP).length); return; }
 
   var libId = 'tcproject:prod:' + pid;
-  var props = {}; props[propId] = value;
+  // Stuur ALLE bestaande props mee, niet alleen het gewijzigde veld (PSet API vervangt, merged niet)
+  var props = {};
+  for (var id in PROP_MAP) {
+    var fn = PROP_MAP[id];
+    if (fn === field) { props[id] = value; }
+    else if (doc[fn]) { props[id] = doc[fn]; }
+  }
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
-  console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Link:', link);
+  console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Alle props:', Object.keys(props).length, '| Link:', link);
   try {
     var resp = await fetch(PSET_BASE + '/psets/changeset', {
       method: 'POST',
