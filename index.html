@@ -843,8 +843,9 @@ async function tcGetMetadata(projectId, bestanden) {
     return null;
   }
 
+  var defResp = null;
   try {
-    var defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+    defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
     var schema = defResp.schema || {};
     var schemaProps = schema.props || schema.properties || {};
     var propIds = Object.keys(schemaProps).filter(function(k) { return k.indexOf('-') > 0; }); // UUIDs bevatten streepjes
@@ -937,6 +938,44 @@ async function tcGetMetadata(projectId, bestanden) {
     };
   }
   console.log('[TC] PROP_MAP definitief:', Object.keys(PROP_MAP).length, 'velden', PROP_MAP);
+
+  // === ENUM_VALUES dynamisch uit i18n ===
+  // i18n bevat entries als "uuid.enum.Waarde": "Waarde" — groepeer per UUID
+  try {
+    var dynEnums = {}; // veldnaam → Set van waarden
+    var flatI18n = {};
+    // Flatten i18n naar key→value (ongeacht geneste locales)
+    function flattenI18n(obj) {
+      if (!obj || typeof obj !== 'object') return;
+      for (var k in obj) {
+        if (typeof obj[k] === 'string') { flatI18n[k] = obj[k]; }
+        else if (typeof obj[k] === 'object') { flattenI18n(obj[k]); }
+      }
+    }
+    flattenI18n(defResp.i18n || {});
+    for (var ik in flatI18n) {
+      var dotEnum = ik.indexOf('.enum.');
+      if (dotEnum === -1) continue;
+      var eUuid = ik.substring(0, dotEnum);
+      var eVal = flatI18n[ik];
+      var eVeld = PROP_MAP[eUuid];
+      if (!eVeld || !eVal) continue;
+      if (!dynEnums[eVeld]) dynEnums[eVeld] = new Set();
+      dynEnums[eVeld].add(eVal);
+    }
+    // Overschrijf ENUM_VALUES met dynamische waarden
+    var dynCount = 0;
+    for (var ev in dynEnums) {
+      ENUM_VALUES[ev] = Array.from(dynEnums[ev]);
+      dynCount++;
+    }
+    if (dynCount > 0) console.log('[TC] ENUM_VALUES dynamisch uit project:', dynCount, 'velden', ENUM_VALUES);
+  } catch(enumErr) {
+    console.warn('[TC] Enum extractie mislukt, gebruik fallback:', enumErr.message);
+  }
+
+  // === EDITABLE_COLS dynamisch opbouwen ===
+  buildEditableCols();
 
   console.log('[TC] ' + instArray.length + ' PSet instances gevonden');
 
@@ -1833,12 +1872,20 @@ async function downloadZIP() {
 }
 
 // === EDIT MODE ===
+// Fallback enum-waarden (worden overschreven als PSet definitie enums bevat)
 var ENUM_VALUES = {
   document_status: ['--','Concept','Voorlopig','Definitief','Vervallen','Voor ontwerp','Voor uitvoering','As built','Intern'],
   discipline: ['--','Opdrachtgever','Architect','Constructeur','Installateur','Adviseur','Hoofdaannemer','Onderaannemer','Leverancier','Overheid','Nuts','Directievoering','Overig'],
   project_fase: ['--','Initiatief','Project definitie','Structuur ontwerp','Voorlopig ontwerp','Definitief ontwerp','Technisch ontwerp','Prijs en contractvorming','Uitvoeringsgereed ontwerp','Realisatie','Gebruik en exploitatie','Project (alle fasen)'],
 };
-var EDITABLE_COLS = ['document_status','discipline','project_fase','bouwdeel','document_nummer','titel','document_datum','revisie','bedrijf','document_soort','bouwnummer','controleverzoek','controlestatus','contract_status'];
+// Dynamisch: elk veld in PROP_MAP is bewerkbaar (wordt gevuld na metadata ophalen)
+var EDITABLE_COLS = [];
+function buildEditableCols() {
+  var psetVelden = [];
+  for (var id in PROP_MAP) { var v = PROP_MAP[id]; if (psetVelden.indexOf(v) === -1) psetVelden.push(v); }
+  EDITABLE_COLS = psetVelden;
+  console.log('[TC] EDITABLE_COLS dynamisch:', EDITABLE_COLS.length, 'velden', EDITABLE_COLS);
+}
 
 function toggleEditMode() {
   if (!editMode) {
