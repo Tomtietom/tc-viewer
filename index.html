@@ -2055,14 +2055,32 @@ async function loadProjectColConfig() {
 async function checkIsProjectAdmin() {
   if (!pid || !tcToken) return;
   try {
-    var resp = await fetch(TC_BASE + '/projects/' + pid, {
-      headers: { 'Authorization': 'Bearer ' + tcToken }
-    });
-    if (!resp.ok) return;
-    var data = await resp.json();
-    var role = (data.myRole || data.role || '').toUpperCase();
-    isProjectAdmin = (role === 'ADMIN' || role === 'EDITOR');
-    console.log('[TC] Project rol:', role, '| Admin:', isProjectAdmin);
+    var myEmail = (window.atfieltTcContext && window.atfieltTcContext.userEmail || '').toLowerCase();
+    if (!myEmail) { console.warn('[TC] Geen email bekend, admin check overgeslagen'); return; }
+    // Haal users op met paginatie (Range header)
+    var allUsers = [];
+    var start = 0, pageSize = 100, hasMore = true;
+    while (hasMore) {
+      var resp = await fetch(TC_BASE + '/projects/' + pid + '/users', {
+        headers: { 'Authorization': 'Bearer ' + tcToken, 'Range': 'items=' + start + '-' + (start + pageSize - 1) }
+      });
+      if (!resp.ok) { console.warn('[TC] Users ophalen mislukt:', resp.status); break; }
+      var users = await resp.json();
+      if (!Array.isArray(users) || users.length === 0) break;
+      allUsers = allUsers.concat(users);
+      // Zodra we onze eigen user vinden, stoppen we
+      var me = users.find(function(u) { return (u.email || '').toLowerCase() === myEmail; });
+      if (me) {
+        var role = (me.role || '').toUpperCase();
+        isProjectAdmin = (role === 'ADMIN');
+        console.log('[TC] Project rol:', role, '| Admin:', isProjectAdmin, '| Email:', myEmail);
+        updateProfileToggleUI();
+        return;
+      }
+      start += pageSize;
+      if (users.length < pageSize) hasMore = false;
+    }
+    console.log('[TC] Eigen user niet gevonden in', allUsers.length, 'project users | Email:', myEmail);
   } catch(e) { console.warn('[TC] Admin check fout:', e.message); }
 }
 
