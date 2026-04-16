@@ -256,8 +256,12 @@ td a:hover{text-decoration:underline}
     <div class="sb-sec" id="colSec">
       <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="document.getElementById('colList').style.display=document.getElementById('colList').style.display==='none'?'block':'none'">Kolommen <span style="font-size:9px;opacity:.5">&#9660;</span></h3>
       <div id="colList" style="display:none;margin-top:6px">
+        <div id="colProfileToggle" style="display:flex;border:1px solid #ddd;border-radius:6px;overflow:hidden;margin-bottom:8px;font-size:10px;font-family:Poppins,sans-serif">
+          <button id="profStd" onclick="switchColProfile('standaard')" style="flex:1;padding:4px 0;border:none;cursor:pointer;font-size:10px;font-family:Poppins,sans-serif;font-weight:600">Standaard</button>
+          <button id="profPers" onclick="switchColProfile('persoonlijk')" style="flex:1;padding:4px 0;border:none;cursor:pointer;font-size:10px;font-family:Poppins,sans-serif;font-weight:600">Persoonlijk</button>
+        </div>
         <div id="colChecks"></div>
-        <div style="display:flex;gap:4px;margin-top:6px">
+        <div id="colActions" style="display:flex;gap:4px;margin-top:6px">
           <button onclick="addMetaCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Metadata</button>
         </div>
       </div>
@@ -405,8 +409,11 @@ const ALL_COLS = [
   {k:'controlestatus',l:'Controlestatus',w:'8%'},
   {k:'controleverzoek',l:'Controleverzoek',w:'8%'},
 ];
-var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','bouwdeel','titel','discipline','bedrijf','project_fase','revisie','document_datum','document_status','_versie','_releases','_gedeeld','_created'];
+// Standaard kolommen en volgorde (basis voor elk project)
+var DEFAULT_VISIBLE = ['bestandsnaam','document_nummer','titel','revisie','document_datum','document_status','bedrijf'];
+var DEFAULT_ORDER = ['bestandsnaam','document_nummer','titel','revisie','document_datum','document_status','bedrijf','bouwnummer','bouwdeel','project_fase','tags','discipline','contract_status','document_soort','controlestatus','controleverzoek','_versie','_releases','_gedeeld','_created'];
 var visibleColKeys = new Set(DEFAULT_VISIBLE);
+var colProfile = 'standaard'; // 'standaard' of 'persoonlijk'
 var customCols = []; // [{k:'custom_1', l:'Mijn kolom'}]
 var customData = {}; // { 'fileVid': { 'custom_1': 'waarde' } }
 var colOrder = []; // keys in volgorde
@@ -414,37 +421,48 @@ var colWidths = {}; // { key: 'px waarde' }
 var _customCounter = 0;
 
 function getColConfigKey() { return 'doclist-config-' + (pid || 'local'); }
-var COL_CONFIG_VERSION = 5; // Verhoog bij structurele wijzigingen
+var COL_CONFIG_VERSION = 6; // Verhoog bij structurele wijzigingen
 function loadColConfig() {
   try {
     var raw = localStorage.getItem(getColConfigKey());
-    if (!raw) return;
+    if (!raw) { colProfile = 'standaard'; applyStandaardProfile(); return; }
     var cfg = JSON.parse(raw);
     // Reset als config van oude versie is
     if (!cfg._v || cfg._v < COL_CONFIG_VERSION) {
       console.log('[Cols] Oude config gereset naar defaults (v' + (cfg._v||0) + ' < v' + COL_CONFIG_VERSION + ')');
       localStorage.removeItem(getColConfigKey());
+      colProfile = 'standaard'; applyStandaardProfile();
       return;
     }
-    if (cfg.visible && Array.isArray(cfg.visible)) {
-      visibleColKeys = new Set(cfg.visible);
-      // Voeg kolommen toe die nieuw zijn sinds de config werd opgeslagen
-      DEFAULT_VISIBLE.forEach(function(k) {
-        var inAllCols = ALL_COLS.some(function(c) { return c.k === k; });
-        var wasBekend = cfg._knownKeys && cfg._knownKeys.indexOf(k) >= 0;
-        if (inAllCols && !wasBekend) visibleColKeys.add(k);
-      });
-    }
+    colProfile = cfg.profile || 'standaard';
     if (cfg.custom && Array.isArray(cfg.custom)) customCols = cfg.custom;
     if (cfg.customData) customData = cfg.customData;
-    if (cfg.order && Array.isArray(cfg.order)) colOrder = cfg.order;
-    if (cfg.widths) colWidths = cfg.widths;
     _customCounter = customCols.length;
+    if (colProfile === 'persoonlijk') {
+      if (cfg.visible && Array.isArray(cfg.visible)) {
+        visibleColKeys = new Set(cfg.visible);
+        DEFAULT_VISIBLE.forEach(function(k) {
+          var inAllCols = ALL_COLS.some(function(c) { return c.k === k; });
+          var wasBekend = cfg._knownKeys && cfg._knownKeys.indexOf(k) >= 0;
+          if (inAllCols && !wasBekend) visibleColKeys.add(k);
+        });
+      }
+      if (cfg.order && Array.isArray(cfg.order)) colOrder = cfg.order;
+      if (cfg.widths) colWidths = cfg.widths;
+    } else {
+      applyStandaardProfile();
+    }
   } catch(e) { console.warn('[Cols] Config laden mislukt:', e); }
+}
+function applyStandaardProfile() {
+  visibleColKeys = new Set(DEFAULT_VISIBLE);
+  colOrder = DEFAULT_ORDER.slice();
+  colWidths = {};
 }
 function saveColConfig() {
   try {
     localStorage.setItem(getColConfigKey(), JSON.stringify({
+      profile: colProfile,
       visible: Array.from(visibleColKeys),
       custom: customCols,
       customData: customData,
@@ -1301,6 +1319,37 @@ function mkTR(naam, cnt, depth, hasCh) {
 function togN(el) { el.classList.toggle('open'); var ch = el.closest('.tr-row').parentElement.nextElementSibling; if (ch && ch.classList.contains('tr-ch')) ch.classList.toggle('hide'); }
 
 // === KOLOM UI ===
+function switchColProfile(prof) {
+  if (prof === 'standaard') {
+    colProfile = 'standaard';
+    applyStandaardProfile();
+  } else {
+    colProfile = 'persoonlijk';
+    // Bij eerste keer persoonlijk: start met standaard als basis
+  }
+  COLS = getCols();
+  saveColConfig();
+  updateProfileToggleUI();
+  renderColChecks(); vulFilters(); if (editMode) vulBulkFields(); bouwTH(); renderT();
+}
+function updateProfileToggleUI() {
+  var btnStd = document.getElementById('profStd');
+  var btnPers = document.getElementById('profPers');
+  var checks = document.getElementById('colChecks');
+  var actions = document.getElementById('colActions');
+  if (!btnStd || !btnPers) return;
+  if (colProfile === 'standaard') {
+    btnStd.style.background = 'var(--af)'; btnStd.style.color = '#fff';
+    btnPers.style.background = '#fff'; btnPers.style.color = '#555';
+    if (checks) checks.style.opacity = '0.45'; if (checks) checks.style.pointerEvents = 'none';
+    if (actions) actions.style.display = 'none';
+  } else {
+    btnPers.style.background = 'var(--af)'; btnPers.style.color = '#fff';
+    btnStd.style.background = '#fff'; btnStd.style.color = '#555';
+    if (checks) checks.style.opacity = '1'; if (checks) checks.style.pointerEvents = '';
+    if (actions) actions.style.display = 'flex';
+  }
+}
 function renderColChecks() {
   var el = document.getElementById('colChecks');
   if (!el) return;
@@ -1327,14 +1376,19 @@ function renderColChecks() {
     html += '</div>';
   });
   el.innerHTML = html;
+  updateProfileToggleUI();
 }
 function toggleCol(key) {
+  // Kolom aan/uitzetten schakelt automatisch naar persoonlijk profiel
+  if (colProfile === 'standaard') { colProfile = 'persoonlijk'; }
   if (visibleColKeys.has(key)) visibleColKeys.delete(key); else visibleColKeys.add(key);
   COLS = getCols();
   saveColConfig();
+  updateProfileToggleUI();
   vulFilters(); if (editMode) vulBulkFields(); bouwTH(); renderT();
 }
 function moveCol(key, dir) {
+  if (colProfile === 'standaard') { colProfile = 'persoonlijk'; updateProfileToggleUI(); }
   // Bouw huidige volgorde als die nog niet bestaat
   if (!colOrder.length) {
     colOrder = ALL_COLS.concat(customCols).map(function(c) { return c.k; });
