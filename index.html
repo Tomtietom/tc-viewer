@@ -92,6 +92,7 @@ input[type=file]{display:none}
 /* Documenten */
 .pg-docs{height:calc(100vh - 48px)}
 .sidebar{width:280px;background:#fff;border-right:1px solid #e8e0d8;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sb-filters{overflow-y:auto;flex-shrink:1;min-height:0}
 .sb-sec{padding:10px 12px;border-bottom:1px solid #eee}
 .sb-sec h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:6px;font-family:'Montserrat',sans-serif}
 .sbox{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:'Poppins',sans-serif;outline:none}
@@ -228,6 +229,7 @@ td a:hover{text-decoration:underline}
 <!-- DOCUMENTEN -->
 <div class="page page-flex pg-docs" id="pgDocs">
   <div class="sidebar">
+    <div class="sb-filters">
     <div class="sb-sec">
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
       <div id="filterRows"></div>
@@ -264,8 +266,13 @@ td a:hover{text-decoration:underline}
         <div id="colActions" style="display:flex;gap:4px;margin-top:6px">
           <button onclick="addMetaCol()" style="flex:1;padding:3px 6px;font-size:10px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;font-family:'Poppins',sans-serif">+ Metadata</button>
         </div>
+        <div id="adminColBtn" style="display:none;margin-top:6px">
+          <button onclick="saveProjectColConfig()" style="width:100%;padding:4px 6px;font-size:10px;border:1px solid var(--af);border-radius:4px;background:#fff8f0;color:var(--af);cursor:pointer;font-family:'Poppins',sans-serif;font-weight:600">&#9881; Instellen als project-standaard</button>
+          <div style="font-size:9px;color:#999;margin-top:2px">Zichtbaar omdat je project-admin bent</div>
+        </div>
       </div>
     </div>
+    </div><!-- /sb-filters -->
     <div class="sb-sec"><h3>Mappen</h3></div>
     <div class="tree" id="treeList"></div>
   </div>
@@ -840,6 +847,12 @@ async function tcAutoFetchData() {
       console.warn('[TC] GEEN docs met metadata gevonden! PROP_MAP:', PROP_MAP);
     }
 
+    // === PROJECT STANDAARD KOLOMMEN LADEN VIA HUB ===
+    try { await loadProjectColConfig(); } catch(e) { console.warn('[TC] Project kolom-config laden mislukt:', e.message); }
+
+    // === TC ADMIN CHECK ===
+    try { await checkIsProjectAdmin(); } catch(e) { console.warn('[TC] Admin check mislukt:', e.message); }
+
     // === DOCUMENTENLIJST TONEN (direct, dashboard op achtergrond) ===
     console.log('[TC] Documentenlijst tonen, docs:', docs.length);
     renderDash();
@@ -1337,17 +1350,20 @@ function updateProfileToggleUI() {
   var btnPers = document.getElementById('profPers');
   var checks = document.getElementById('colChecks');
   var actions = document.getElementById('colActions');
+  var adminBtn = document.getElementById('adminColBtn');
   if (!btnStd || !btnPers) return;
   if (colProfile === 'standaard') {
     btnStd.style.background = 'var(--af)'; btnStd.style.color = '#fff';
     btnPers.style.background = '#fff'; btnPers.style.color = '#555';
     if (checks) checks.style.opacity = '0.45'; if (checks) checks.style.pointerEvents = 'none';
     if (actions) actions.style.display = 'none';
+    if (adminBtn) adminBtn.style.display = 'none';
   } else {
     btnPers.style.background = 'var(--af)'; btnPers.style.color = '#fff';
     btnStd.style.background = '#fff'; btnStd.style.color = '#555';
     if (checks) checks.style.opacity = '1'; if (checks) checks.style.pointerEvents = '';
     if (actions) actions.style.display = 'flex';
+    if (adminBtn) adminBtn.style.display = isProjectAdmin ? 'block' : 'none';
   }
 }
 function renderColChecks() {
@@ -2001,6 +2017,79 @@ function buildEditableCols() {
   for (var id in PROP_MAP) { var v = PROP_MAP[id]; if (psetVelden.indexOf(v) === -1) psetVelden.push(v); }
   EDITABLE_COLS = psetVelden;
   console.log('[TC] EDITABLE_COLS dynamisch:', EDITABLE_COLS.length, 'velden', EDITABLE_COLS);
+}
+
+// === PROJECT KOLOM-CONFIG VIA HUB ===
+var HUB_BASE = 'https://atfielt-extension-hub.tom-da0.workers.dev';
+var isProjectAdmin = false;
+
+function getHubSessionToken() {
+  try { return sessionStorage.getItem('atfielt-hub-session') || ''; } catch(_) { return ''; }
+}
+
+async function loadProjectColConfig() {
+  if (!pid) return;
+  var token = getHubSessionToken();
+  if (!token) { console.warn('[TC] Geen hub session token, skip config laden'); return; }
+  var resp = await fetch(HUB_BASE + '/api/extension-config?slug=documentenlijst&project=' + encodeURIComponent(pid) + '&key=default_columns', {
+    headers: { 'X-Session': token }
+  });
+  if (!resp.ok) { console.warn('[TC] Config endpoint:', resp.status); return; }
+  var data = await resp.json();
+  if (!data.found || !data.value) { console.log('[TC] Geen project kolom-config gevonden, gebruik hardcoded standaard'); return; }
+  var cfg = data.value;
+  if (cfg.visible && Array.isArray(cfg.visible)) {
+    DEFAULT_VISIBLE = cfg.visible;
+    console.log('[TC] Project standaard kolommen geladen:', DEFAULT_VISIBLE.length, 'velden (door', data.updatedBy + ')');
+  }
+  if (cfg.order && Array.isArray(cfg.order)) {
+    DEFAULT_ORDER = cfg.order;
+  }
+  // Pas toe als gebruiker op standaard-profiel staat
+  if (colProfile === 'standaard') {
+    applyStandaardProfile();
+    COLS = getCols();
+  }
+}
+
+async function checkIsProjectAdmin() {
+  if (!pid || !tcToken) return;
+  try {
+    var resp = await fetch(TC_BASE + '/projects/' + pid, {
+      headers: { 'Authorization': 'Bearer ' + tcToken }
+    });
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var role = (data.myRole || data.role || '').toUpperCase();
+    isProjectAdmin = (role === 'ADMIN' || role === 'EDITOR');
+    console.log('[TC] Project rol:', role, '| Admin:', isProjectAdmin);
+  } catch(e) { console.warn('[TC] Admin check fout:', e.message); }
+}
+
+async function saveProjectColConfig() {
+  if (!pid || !isProjectAdmin) return;
+  var token = getHubSessionToken();
+  if (!token) { alert('Geen actieve sessie. Herlaad de extensie.'); return; }
+  var config = {
+    visible: Array.from(visibleColKeys),
+    order: colOrder.length ? colOrder : ALL_COLS.concat(customCols).map(function(c) { return c.k; })
+  };
+  try {
+    var resp = await fetch(HUB_BASE + '/api/extension-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session': token },
+      body: JSON.stringify({ slug: 'documentenlijst', project: pid, key: 'default_columns', value: config, tcToken: tcToken })
+    });
+    var data = await resp.json();
+    if (!resp.ok) { alert('Opslaan mislukt: ' + (data.error || resp.status)); return; }
+    // Update lokale standaard
+    DEFAULT_VISIBLE = config.visible;
+    DEFAULT_ORDER = config.order;
+    alert('Standaard kolommen opgeslagen voor dit project.\nAlle gebruikers zien deze instelling bij "Standaard".');
+    console.log('[TC] Project standaard kolommen opgeslagen:', config.visible.length, 'kolommen');
+  } catch(e) {
+    alert('Opslaan mislukt: ' + e.message);
+  }
 }
 
 function toggleEditMode() {
