@@ -650,28 +650,59 @@ function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 // === TC API CALLS ===
-async function tcFetch(path) {
-  await _ensureValidToken();
-  var url = TC_BASE + path;
-  var r = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
-  if (r.status === 401) {
-    await _ensureValidToken();
-    r = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
-  }
-  if (!r.ok) { console.warn('[TC] ' + r.status + ' voor ' + url); throw new Error(r.status + ' ' + r.statusText); }
-  return r.json();
+// Opts (optioneel):
+//   method: 'GET'|'POST'|'DELETE'|'PUT' (default 'GET')
+//   body: object of string (wordt JSON.stringify'd als object)
+//   extraHeaders: { 'Range': 'items=0-99', ... }
+//   rawResponse: true → return Response object (voor headers/blobs), anders .json()
+function _buildTcRequest(path, opts, base) {
+  opts = opts || {};
+  var headers = { 'Authorization': 'Bearer ' + tcToken, 'Accept': 'application/json' };
+  var body = opts.body;
+  if (body && typeof body !== 'string') { body = JSON.stringify(body); headers['Content-Type'] = 'application/json'; }
+  if (opts.extraHeaders) { for (var h in opts.extraHeaders) headers[h] = opts.extraHeaders[h]; }
+  return {
+    url: base + path,
+    init: { method: opts.method || 'GET', headers: headers, body: body }
+  };
 }
 
-async function tcFetchPSet(path) {
+async function tcFetch(path, opts) {
+  opts = opts || {};
   await _ensureValidToken();
-  var url = PSET_BASE + path;
-  var r = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
-  if (r.status === 401) {
-    await _ensureValidToken();
-    r = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + tcToken } });
-  }
+  var req = _buildTcRequest(path, opts, TC_BASE);
+  // Build headers fresh na eventuele token refresh (tcToken kan veranderd zijn)
+  var doFetch = function() {
+    var freshReq = _buildTcRequest(path, opts, TC_BASE);
+    return fetchWithTimeout(freshReq.url, freshReq.init);
+  };
+  var r = await doFetch();
+  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
+  // Bij rawResponse: caller handelt status+body zelf af (voor gedetailleerde error messages)
+  if (opts.rawResponse) return r;
+  if (!r.ok) { console.warn('[TC] ' + r.status + ' voor ' + req.url); throw new Error(r.status + ' ' + r.statusText); }
+  // Sommige endpoints (DELETE, 204 No Content) geven geen body terug
+  if (r.status === 204) return null;
+  var txt = await r.text();
+  if (!txt) return null;
+  try { return JSON.parse(txt); } catch(_) { return txt; }
+}
+
+async function tcFetchPSet(path, opts) {
+  opts = opts || {};
+  await _ensureValidToken();
+  var doFetch = function() {
+    var freshReq = _buildTcRequest(path, opts, PSET_BASE);
+    return fetchWithTimeout(freshReq.url, freshReq.init);
+  };
+  var r = await doFetch();
+  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
+  if (opts.rawResponse) return r;
   if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
-  return r.json();
+  if (r.status === 204) return null;
+  var txt = await r.text();
+  if (!txt) return null;
+  try { return JSON.parse(txt); } catch(_) { return txt; }
 }
 
 function tcStep(n, status, text) {
@@ -1745,9 +1776,13 @@ async function laadPreview(vid, naam, ext, imgExts) {
   if (!el) return;
   try {
     var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-    var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + vid + '/downloadurl', {
-      headers: { 'Authorization': 'Bearer ' + tcToken }
-    });
+    var proxyUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + vid + '/downloadurl';
+    var doPrev = function() {
+      return fetchWithTimeout(proxyUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+    };
+    await _ensureValidToken();
+    var dlResp = await doPrev();
+    if (dlResp.status === 401) { await _ensureValidToken(); dlResp = await doPrev(); }
     if (!dlResp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
     var dlData = await dlResp.json();
     var resp = await fetch(dlData.url);
@@ -1841,12 +1876,18 @@ function toonReleaseDetail(relId) {
 async function removeFromRelease(relId, fileId, fileName) {
   if (!confirm('Verwijder "' + fileName + '" uit deze release?')) return;
   var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-  try {
-    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files', {
+  var url = PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files';
+  var doReq = function() {
+    return fetchWithTimeout(url, {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
       body: JSON.stringify([{ id: fileId, type: 'FILE' }])
     });
+  };
+  try {
+    await _ensureValidToken();
+    var resp = await doReq();
+    if (resp.status === 401) { await _ensureValidToken(); resp = await doReq(); }
     if (!resp.ok) { alert('Verwijderen mislukt: ' + resp.status); return; }
     await fetchReleases();
     docs.forEach(function(d) { d._releases = (releaseMap[d._vid]||[]).join(', '); });
@@ -1888,7 +1929,11 @@ async function downloadRelease(relId) {
     if (!dlFileId) { console.warn('[Release DL] Geen fileId voor:', f.name, f); failed++; continue; }
     try {
       var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-      var dlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + dlFileId + '/downloadurl', { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      var dlUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + dlFileId + '/downloadurl';
+      var doDl = function() { return fetchWithTimeout(dlUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } }); };
+      await _ensureValidToken();
+      var dlResp = await doDl();
+      if (dlResp.status === 401) { await _ensureValidToken(); dlResp = await doDl(); }
       if (!dlResp.ok) { console.warn('[Release DL] downloadurl mislukt:', dlFileId, dlResp.status); failed++; continue; }
       var dlData = await dlResp.json();
       var resp = await fetch(dlData.url);
@@ -1958,9 +2003,13 @@ async function downloadZIP() {
     try {
       // Stap 1: haal signed download URL op via TC API
       var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-      var dlUrlResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + doc._vid + '/downloadurl', {
-        headers: { 'Authorization': 'Bearer ' + tcToken }
-      });
+      var zipDlUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + doc._vid + '/downloadurl';
+      var doZipDl = function() {
+        return fetchWithTimeout(zipDlUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } });
+      };
+      await _ensureValidToken();
+      var dlUrlResp = await doZipDl();
+      if (dlUrlResp.status === 401) { await _ensureValidToken(); dlUrlResp = await doZipDl(); }
       if (!dlUrlResp.ok) { console.warn('[ZIP] Download URL mislukt:', doc.bestandsnaam, dlUrlResp.status); failed++; continue; }
       var dlData = await dlUrlResp.json();
       // Stap 2: download bestand via signed URL (geen auth nodig)
@@ -2057,17 +2106,18 @@ async function checkIsProjectAdmin() {
   try {
     var myEmail = (window.atfieltTcContext && window.atfieltTcContext.userEmail || '').toLowerCase();
     if (!myEmail) { console.warn('[TC] Geen email bekend, admin check overgeslagen'); return; }
-    // Haal users op met paginatie (Range header)
-    var allUsers = [];
+    // Haal users op met paginatie (Range header) — via tcFetch voor automatische token-refresh
+    var totalUsers = 0;
     var start = 0, pageSize = 100, hasMore = true;
     while (hasMore) {
-      var resp = await fetch(TC_BASE + '/projects/' + pid + '/users', {
-        headers: { 'Authorization': 'Bearer ' + tcToken, 'Range': 'items=' + start + '-' + (start + pageSize - 1) }
-      });
-      if (!resp.ok) { console.warn('[TC] Users ophalen mislukt:', resp.status); break; }
-      var users = await resp.json();
+      var users;
+      try {
+        users = await tcFetch('/projects/' + pid + '/users', {
+          extraHeaders: { 'Range': 'items=' + start + '-' + (start + pageSize - 1) }
+        });
+      } catch(e) { console.warn('[TC] Users ophalen mislukt:', e.message); break; }
       if (!Array.isArray(users) || users.length === 0) break;
-      allUsers = allUsers.concat(users);
+      totalUsers += users.length;
       // Zodra we onze eigen user vinden, stoppen we
       var me = users.find(function(u) { return (u.email || '').toLowerCase() === myEmail; });
       if (me) {
@@ -2080,7 +2130,7 @@ async function checkIsProjectAdmin() {
       start += pageSize;
       if (users.length < pageSize) hasMore = false;
     }
-    console.log('[TC] Eigen user niet gevonden in', allUsers.length, 'project users | Email:', myEmail);
+    console.log('[TC] Eigen user niet gevonden in', totalUsers, 'project users | Email:', myEmail);
   } catch(e) { console.warn('[TC] Admin check fout:', e.message); }
 }
 
@@ -2221,10 +2271,10 @@ async function bulkSave() {
   statusEl.style.color = '#D4821A';
   var saved = 0, saveError = null;
   try {
-    var resp = await fetch(PSET_BASE + '/psets/changeset', {
+    var resp = await tcFetchPSet('/psets/changeset', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: changeItems })
+      body: { items: changeItems },
+      rawResponse: true
     });
     var respBody = await resp.text();
     console.log('[TC] Bulk changeset response:', resp.status, respBody);
@@ -2267,10 +2317,10 @@ async function saveCell(doc, field, value, el) {
   // Visuele feedback: bezig = oranje
   if (el) { el.style.borderColor = '#D4821A'; el.style.background = '#FFF8E1'; }
   try {
-    var resp = await fetch(PSET_BASE + '/psets/changeset', {
+    var resp = await tcFetchPSet('/psets/changeset', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ link: link, libId: libId, defId: 'tcfiles', props: props }] })
+      body: { items: [{ link: link, libId: libId, defId: 'tcfiles', props: props }] },
+      rawResponse: true
     });
     var respBody = await resp.text();
     console.log('[TC] Changeset response:', resp.status, respBody);
@@ -2396,11 +2446,17 @@ async function sendShare(method) {
 
   try {
     var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
-    var resp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/shares', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    var shareUrl = PROXY_BASE + '/tc/' + tcRegion + '/shares';
+    var doShare = function() {
+      return fetchWithTimeout(shareUrl, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    };
+    await _ensureValidToken();
+    var resp = await doShare();
+    if (resp.status === 401) { await _ensureValidToken(); resp = await doShare(); }
     if (!resp.ok) { var errTxt = await resp.text(); throw new Error(resp.status + ': ' + errTxt); }
     var result = await resp.json();
     console.log('[Share] Volledige API response:', JSON.stringify(result, null, 2));
@@ -2552,11 +2608,17 @@ async function submitRelease() {
       var notes = document.getElementById('releaseNotes').value.trim();
       if (notes) createBody.notes = notes;
 
-      var createResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify(createBody)
-      });
+      var createUrl = PROXY_BASE + '/tc/' + tcRegion + '/releases';
+      var doCreate = function() {
+        return fetchWithTimeout(createUrl, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify(createBody)
+        });
+      };
+      await _ensureValidToken();
+      var createResp = await doCreate();
+      if (createResp.status === 401) { await _ensureValidToken(); createResp = await doCreate(); }
       if (!createResp.ok) { var err = await createResp.text(); throw new Error('Release aanmaken mislukt: ' + err); }
       var createResult = await createResp.json();
       relId = createResult.id;
@@ -2569,11 +2631,17 @@ async function submitRelease() {
 
     // Bestanden toevoegen aan release
     var fileItems = _releaseDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; });
-    var addResp = await fetch(PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify(fileItems)
-    });
+    var addUrl = PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files';
+    var doAdd = function() {
+      return fetchWithTimeout(addUrl, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tcToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(fileItems)
+      });
+    };
+    await _ensureValidToken();
+    var addResp = await doAdd();
+    if (addResp.status === 401) { await _ensureValidToken(); addResp = await doAdd(); }
     if (!addResp.ok) { var err2 = await addResp.text(); throw new Error('Bestanden toevoegen mislukt: ' + err2); }
     console.log('[Release] ' + _releaseDocs.length + ' bestanden toegevoegd aan release ' + relName);
 
