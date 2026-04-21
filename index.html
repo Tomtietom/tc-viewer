@@ -49,6 +49,15 @@ body{font-family:'Poppins',-apple-system,sans-serif;background:#f9f9f9;color:#22
 /* Secundaire acties (outlined) — bv. ZIP, CSV, Releases, + Release, Delen */
 .hdr .action-btn.sec{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.2);font-weight:500}
 .hdr .action-btn.sec:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35)}
+/* Overflow-menu (⋯) */
+.hdr .menu-wrap{position:relative;display:inline-block}
+.hdr .menu-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.15);padding:6px 12px;border-radius:var(--r-pill);font-size:var(--fs-md);cursor:pointer;font-weight:600;letter-spacing:1px;line-height:1}
+.hdr .menu-btn:hover{background:rgba(255,255,255,.2)}
+.hdr .menu-drop{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid var(--hl-light);border-radius:var(--r-md);box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:180px;z-index:150;overflow:hidden}
+.hdr .menu-drop.open{display:block}
+.hdr .menu-drop button{display:block;width:100%;padding:10px var(--s4);background:#fff;color:var(--dk);border:none;text-align:left;font-size:var(--fs-sm);font-family:'Poppins',sans-serif;cursor:pointer;border-radius:0;font-weight:500;letter-spacing:normal;transition:background .1s}
+.hdr .menu-drop button:hover{background:var(--afl);color:var(--af)}
+.hdr .menu-drop hr{border:none;border-top:1px solid var(--hl-light);margin:4px 0}
 
 .page{display:none;min-height:calc(100vh - 48px)}
 .page.active{display:block}
@@ -218,9 +227,6 @@ td a:hover{text-decoration:underline}
 .ftr{padding:6px var(--s5);background:#fff;border-top:1px solid var(--hl-light);font-size:var(--fs-xs);color:var(--g4);display:flex;justify-content:space-between}
 
 /* Sidebar-filter helpers */
-.ext-filter{margin-top:var(--s3);display:none}
-.ext-filter-lbl{font-size:var(--fs-xs);color:var(--g4);margin-bottom:var(--s1)}
-.ext-filter-lbl .hint{opacity:.6}
 .ext-chips{display:flex;flex-wrap:wrap;gap:var(--s1)}
 .ext-chip{cursor:pointer;font-size:var(--fs-xs);padding:3px 9px;border-radius:var(--r-pill);font-family:'Poppins',sans-serif;user-select:none;border:1px solid var(--hl);background:#fff;color:var(--g5);font-weight:400;transition:all .15s}
 .ext-chip:hover{border-color:var(--af);color:var(--af)}
@@ -228,9 +234,19 @@ td a:hover{text-decoration:underline}
 .ext-chip .n{opacity:.7;font-weight:500}
 .hint{font-size:10px;color:var(--g3);margin-top:var(--s1)}
 
+/* Collapsible sidebar-secties */
+.sb-collapsible .sec-toggle{cursor:pointer;display:flex;justify-content:space-between;align-items:center;margin-bottom:0;user-select:none;transition:color .15s}
+.sb-collapsible .sec-toggle:hover{color:var(--af)}
+.sb-collapsible .sb-body{display:none;margin-top:var(--s3)}
+.sb-collapsible.open .sb-body{display:block}
+.sb-collapsible .caret{font-size:9px;opacity:.5;transition:transform .2s;color:var(--g4)}
+.sb-collapsible.open .caret{transform:rotate(180deg);color:var(--af);opacity:.8}
+.sb-collapsible.open .sec-toggle{color:var(--af)}
+/* #colList is een bijzondere sb-body — zelfde toggle-gedrag */
+.sb-collapsible #colList{display:none;margin-top:var(--s3)}
+.sb-collapsible.open #colList{display:block}
+
 /* Kolommen sectie */
-.sec-toggle{cursor:pointer;display:flex;justify-content:space-between;align-items:center}
-.sec-toggle .caret{font-size:9px;opacity:.5;transition:transform .15s}
 .col-list{display:none;margin-top:var(--s2)}
 .profile-toggle{display:flex;border:1px solid var(--hl);border-radius:var(--r-sm);overflow:hidden;margin-bottom:var(--s3);font-size:var(--fs-xs);font-family:'Poppins',sans-serif}
 .profile-toggle .pt-btn{flex:1;padding:6px 0;border:none;cursor:pointer;font-size:var(--fs-xs);font-family:'Poppins',sans-serif;font-weight:600;background:#fff;color:var(--g5);transition:all .15s}
@@ -269,12 +285,17 @@ td a:hover{text-decoration:underline}
   <span class="info" id="hdrInfo"></span>
   <span class="spacer"></span>
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
-  <button class="action-btn sec" id="relBtn" onclick="toonReleases()" style="display:none">&#128230; Releases</button>
   <button class="action-btn sec" id="shareBtn" onclick="openShareDialog()" style="display:none">&#128228; Delen</button>
   <button class="action-btn sec" id="relAddBtn" onclick="openReleaseDialog()" style="display:none">&#128230; + Release</button>
   <button class="action-btn" id="editBtn" onclick="toggleEditMode()" style="display:none">&#128274; Bewerken</button>
-  <button class="action-btn sec" id="zipBtn" onclick="downloadZIP()" style="display:none">&#128230; ZIP</button>
-  <button class="action-btn sec" id="csvBtn" onclick="exportCSV()">&#11015; CSV</button>
+  <span class="menu-wrap" id="menuWrap">
+    <button class="menu-btn" id="menuBtn" onclick="toggleHdrMenu(event)" title="Meer acties">&#8943;</button>
+    <div class="menu-drop" id="menuDrop">
+      <button id="mRelBtn" onclick="toonReleases();closeHdrMenu()" style="display:none">&#128230; Releases bekijken</button>
+      <button id="mZipBtn" onclick="downloadZIP();closeHdrMenu()" style="display:none">&#128230; Download als ZIP</button>
+      <button id="mCsvBtn" onclick="exportCSV();closeHdrMenu()">&#11015; Exporteer als CSV</button>
+    </div>
+  </span>
 </div>
 
 <!-- TC LOADING -->
@@ -312,33 +333,56 @@ td a:hover{text-decoration:underline}
 <div class="page page-flex pg-docs" id="pgDocs">
   <div class="sidebar">
     <div class="sb-filters">
+
+    <!-- Zoekbox — altijd zichtbaar -->
     <div class="sb-sec">
       <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
-      <div id="filterRows"></div>
-      <div id="extFilterWrap" class="ext-filter">
-        <div class="ext-filter-lbl">Bestandstype <span class="hint">(klik om alleen deze te tonen)</span></div>
-        <div id="extChips" class="ext-chips"></div>
-      </div>
-      <div class="frow">
-        <select id="fMetaFilter" onchange="renderT()">
-          <option value="">Alle documenten</option>
-          <option value="with">Alleen met metadata</option>
-          <option value="without">Alleen zonder metadata</option>
-          <option value="incomplete">Verplichte metadata incompleet</option>
-          <option value="recent7d">Recent toegevoegd (7 dagen)</option>
-        </select>
-        <select id="fRelease" onchange="renderT()"></select>
-      </div>
-      <div class="frow" style="justify-content:flex-end">
-        <button onclick="resetFilters()" class="sb-btn">Reset filters</button>
-      </div>
-      <div class="frow">
-        <select id="fGroep" onchange="renderT()" class="groep-sel"></select>
+    </div>
+
+    <!-- Filters — collapsible, standaard dicht -->
+    <div class="sb-sec sb-collapsible" id="filtersSec">
+      <h3 class="sec-toggle" onclick="toggleSbSec('filtersSec')">Filters <span class="caret">&#9660;</span></h3>
+      <div class="sb-body">
+        <div id="filterRows"></div>
       </div>
     </div>
-    <div class="sb-sec" id="colSec">
-      <h3 class="sec-toggle" onclick="var el=document.getElementById('colList');el.style.display=(el.style.display==='block'?'none':'block')">Kolommen <span class="caret">&#9660;</span></h3>
-      <div id="colList" class="col-list">
+
+    <!-- Bestandstype — collapsible, auto-hide als geen data -->
+    <div class="sb-sec sb-collapsible" id="extFilterWrap" style="display:none">
+      <h3 class="sec-toggle" onclick="toggleSbSec('extFilterWrap')">Bestandstype <span class="caret">&#9660;</span></h3>
+      <div class="sb-body">
+        <div class="hint" style="margin-top:0;margin-bottom:var(--s2)">Klik om alleen deze te tonen</div>
+        <div id="extChips" class="ext-chips"></div>
+      </div>
+    </div>
+
+    <!-- Weergave — collapsible, standaard dicht -->
+    <div class="sb-sec sb-collapsible" id="weergaveSec">
+      <h3 class="sec-toggle" onclick="toggleSbSec('weergaveSec')">Weergave <span class="caret">&#9660;</span></h3>
+      <div class="sb-body">
+        <div class="frow">
+          <select id="fMetaFilter" onchange="renderT()">
+            <option value="">Alle documenten</option>
+            <option value="with">Alleen met metadata</option>
+            <option value="without">Alleen zonder metadata</option>
+            <option value="incomplete">Verplichte metadata incompleet</option>
+            <option value="recent7d">Recent toegevoegd (7 dagen)</option>
+          </select>
+          <select id="fRelease" onchange="renderT()"></select>
+        </div>
+        <div class="frow">
+          <select id="fGroep" onchange="renderT()" class="groep-sel"></select>
+        </div>
+        <div class="frow" style="justify-content:flex-end">
+          <button onclick="resetFilters()" class="sb-btn">Reset filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kolommen — collapsible, standaard dicht -->
+    <div class="sb-sec sb-collapsible" id="colSec">
+      <h3 class="sec-toggle" onclick="toggleSbSec('colSec')">Kolommen <span class="caret">&#9660;</span></h3>
+      <div class="sb-body" id="colList">
         <div id="colProfileToggle" class="profile-toggle">
           <button id="profStd" onclick="switchColProfile('standaard')" class="pt-btn">Standaard</button>
           <button id="profPers" onclick="switchColProfile('persoonlijk')" class="pt-btn">Persoonlijk</button>
@@ -353,7 +397,10 @@ td a:hover{text-decoration:underline}
         </div>
       </div>
     </div>
+
     </div><!-- /sb-filters -->
+
+    <!-- Mappen — altijd open -->
     <div class="sb-sec"><h3>Mappen</h3></div>
     <div class="tree" id="treeList"></div>
   </div>
@@ -590,11 +637,54 @@ function goTo(id) {
   var isStart = (id==='pgLoading'||id==='pgUpload');
   document.getElementById('backBtn').style.display = isStart ? 'none' : 'block';
   document.getElementById('backBtn').innerHTML = id==='pgDocs' ? '&#9776; Dashboard' : '&#8592; Terug';
-  document.getElementById('relBtn').style.display = (id==='pgDocs'||id==='pgDash') ? 'block' : 'none';
-  document.getElementById('csvBtn').style.display = id==='pgDocs' ? 'block' : 'none';
-  document.getElementById('zipBtn').style.display = id==='pgDocs' ? 'block' : 'none';
+  // Menu-items binnen overflow dropdown
+  document.getElementById('mRelBtn').style.display = (id==='pgDocs'||id==='pgDash') ? 'block' : 'none';
+  document.getElementById('mCsvBtn').style.display = id==='pgDocs' ? 'block' : 'none';
+  document.getElementById('mZipBtn').style.display = id==='pgDocs' ? 'block' : 'none';
+  // Primaire header-knoppen
   document.getElementById('editBtn').style.display = id==='pgDocs' ? 'block' : 'none';
   if (id !== 'pgDocs' && editMode) { editMode = false; selectedDocs.clear(); }
+}
+
+// Header overflow-menu toggle
+function toggleHdrMenu(e) {
+  if (e) e.stopPropagation();
+  var drop = document.getElementById('menuDrop');
+  drop.classList.toggle('open');
+}
+function closeHdrMenu() {
+  var drop = document.getElementById('menuDrop');
+  if (drop) drop.classList.remove('open');
+}
+document.addEventListener('click', function(e) {
+  var wrap = document.getElementById('menuWrap');
+  if (wrap && !wrap.contains(e.target)) closeHdrMenu();
+});
+
+// Sidebar-sectie toggle (collapsible)
+function toggleSbSec(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+// Auto-open een sectie als hij actieve filters/selecties bevat.
+// Voorkomt dat een gebruiker filters draait zonder het te zien.
+function autoOpenSidebarSections() {
+  // Filters-sectie: open als één van de metadata-selects een waarde heeft
+  var filterActive = false;
+  document.querySelectorAll('#filterRows select').forEach(function(s) { if (s.value) filterActive = true; });
+  if (filterActive) { var fs = document.getElementById('filtersSec'); if (fs) fs.classList.add('open'); }
+  // Weergave-sectie: open bij fMetaFilter, fRelease of fGroep
+  var mf = document.getElementById('fMetaFilter');
+  var rf = document.getElementById('fRelease');
+  var gf = document.getElementById('fGroep');
+  if ((mf && mf.value) || (rf && rf.value) || (gf && gf.value)) {
+    var ws = document.getElementById('weergaveSec'); if (ws) ws.classList.add('open');
+  }
+  // Bestandstype: open als er extensies zijn geselecteerd
+  if (includedExts && includedExts.size > 0) {
+    var xs = document.getElementById('extFilterWrap'); if (xs) xs.classList.add('open');
+  }
 }
 function goBack() {
   // Nooit terug naar pgLoading of pgUpload
@@ -1299,6 +1389,7 @@ function toonDocs() {
       docs.forEach(function(d) { if (shareLog[d._vid]) d._gedeeld = shareLog[d._vid].date.split('T')[0]; });
     } catch(e) {}
     vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
+    autoOpenSidebarSections();
     document.getElementById('searchBox').addEventListener('input', renderT);
   } else {
     // Herrender bij terugnavigatie (metadata kan intussen geladen zijn)
@@ -2065,9 +2156,13 @@ async function downloadZIP() {
   var label = selectedDocs.size > 0 ? filtered.length + ' geselecteerde bestanden' : filtered.length + ' bestanden';
   if (!confirm('Download ' + label + ' als ZIP?\n\nDit kan even duren bij grote bestanden.')) return;
 
-  var zipBtn = document.getElementById('zipBtn');
+  // Gebruik de menu-knop (⋯) tijdelijk als progress-indicator
+  var zipBtn = document.getElementById('menuBtn');
+  var origMenuText = zipBtn.textContent;
   zipBtn.textContent = '⏳ 0/' + filtered.length;
   zipBtn.disabled = true;
+  zipBtn.style.minWidth = '80px';
+  closeHdrMenu();
 
   var zip = new JSZip();
   var downloaded = 0, failed = 0;
@@ -2122,8 +2217,10 @@ async function downloadZIP() {
     alert('ZIP aanmaken mislukt: ' + e.message);
   }
 
-  zipBtn.textContent = '📦 ZIP';
+  // Restore menu-knop
+  zipBtn.textContent = origMenuText || '⋯';
   zipBtn.disabled = false;
+  zipBtn.style.minWidth = '';
   if (failed > 0) alert(downloaded + ' bestanden gedownload, ' + failed + ' mislukt.');
 }
 
