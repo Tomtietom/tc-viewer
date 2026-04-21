@@ -11,28 +11,29 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Poppins',-apple-system,sans-serif;background:#FBF8F3;color:#222;min-height:100vh;font-size:13px;line-height:1.4}
+body{font-family:'Poppins',system-ui,-apple-system,sans-serif;background:#fff;color:#222;min-height:100vh;font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:'Montserrat',system-ui,sans-serif;letter-spacing:-.02em}
 :root{
-  /* At Fielt huisstijl — consistent met website (custom.css) */
-  --af:#d4821a;--af2:#ec5d0e;--afl:#fef5eb;
-  --dk:#222;--gr:#f5f0ea;--afs:#f5e6d6;
-  --ok:#2d6a4f;--okbg:#d4edda;--info:#004085;--infobg:#cce5ff;--warn:#c0392b;
-  /* Neutrale grijsschaal (uit website stijl) */
-  --g1:#f9f9f9;--g2:#f5f0ea;--g3:#b8b5ad;--g4:#7f8c8d;--g5:#555;--g6:#333;
-  /* Hairlines — subtieler dan #ddd/#eee */
+  /* At Fielt huisstijl — 1:1 overgenomen uit website custom.css */
+  --af:#D4821A;--af2:#8a5410;--afl:#F5E6D6;
+  --dk:#222;--gr:#F5F0EA;--afs:#F5E6D6;
+  --ok:#2d6a4f;--okbg:#d4edda;--info:#004085;--infobg:#cce5ff;--warn:#a34020;
+  /* Neutrale grijsschaal (exact uit website) */
+  --g1:#F9F9F9;--g2:#F5F0EA;--g3:#999999;--g4:#7F8C8D;--g5:#555555;--g6:#333333;
+  /* Hairlines (exact uit website) */
   --hl-light:#e8e2d8;--hl:#d6cdc0;
-  /* Border-radius: 2 schalen */
-  --r-sm:6px;   /* inputs, chips, compacte knoppen */
-  --r-md:10px;  /* kaarten, medium knoppen */
-  --r-lg:14px;  /* modals, hero cards */
+  /* Border-radius: 2 schalen (website gebruikt vooral 8 en 12) */
+  --r-sm:8px;   /* inputs, chips, compacte knoppen */
+  --r-md:12px;  /* kaarten, medium knoppen */
+  --r-lg:16px;  /* modals, hero cards */
   --r-pill:999px; /* pill-buttons */
   /* Spacing */
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;
   /* Font-sizes: 4 schalen */
-  --fs-xs:11px; /* meta, badges, kleine labels */
-  --fs-sm:12px; /* compact UI */
-  --fs-md:13px; /* body standaard */
-  --fs-lg:15px; /* headings */
+  --fs-xs:11px;
+  --fs-sm:12px;
+  --fs-md:13px;
+  --fs-lg:15px;
 }
 
 .hdr{background:var(--dk);color:#fff;padding:var(--s3) var(--s5);display:flex;align-items:center;gap:var(--s2);box-shadow:0 2px 8px rgba(0,0,0,.15);position:sticky;top:0;z-index:100}
@@ -1420,14 +1421,16 @@ function toonDocs() {
 // Kolommen die als filter/groepering beschikbaar zijn (tekstvelden, geen datum/revisie/bestandsnaam)
 var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','_created','_versie','_releases','_gedeeld','titel'];
 var includedExts = new Set();
+// Persistente filter-state per kolom — overleeft profile-switch en rerender van #filterRows
+var colFilterState = {};
 
 function getExt(naam) {
   var n = (naam || '').toLowerCase();
   var i = n.lastIndexOf('.');
   if (i <= 0 || i >= n.length - 1) return '';
   var e = n.slice(i + 1);
-  // Negeer extensies met spaties of rare tekens (waarschijnlijk geen echte extensie)
-  if (!/^[a-z0-9]{1,6}$/.test(e)) return '';
+  // Accepteer extensies tot 8 tekens — voorheen 6, miste .sketch/.config/.ifczip
+  if (!/^[a-z0-9]{1,8}$/.test(e)) return '';
   return e;
 }
 
@@ -1467,10 +1470,16 @@ function vulFilters() {
   filterCols.forEach(function(c) { sets[c.k] = new Set(); });
   docs.forEach(function(d) { for (var k in sets) { var v = docVal(d, k); if (v) sets[k].add(v); } });
 
-  // Bewaar huidige filterwaarden
-  var curFilters = {};
+  // Synchroniseer DOM-waarden → persistente state (voor kolommen die nu zichtbaar zijn)
   document.querySelectorAll('#filterRows select').forEach(function(sel) {
-    if (sel.value && sel.dataset.fk) curFilters[sel.dataset.fk] = sel.value;
+    if (sel.dataset.fk) {
+      if (sel.value) colFilterState[sel.dataset.fk] = sel.value;
+      else delete colFilterState[sel.dataset.fk];
+    }
+  });
+  // Ruim filter-waardes op die niet meer geldig zijn voor het huidige schema
+  Object.keys(colFilterState).forEach(function(k) {
+    if (!sets[k] || !sets[k].has(colFilterState[k])) delete colFilterState[k];
   });
 
   // Bouw filter dropdowns (2 per rij)
@@ -1485,8 +1494,13 @@ function vulFilters() {
       sel.dataset.fk = c.k;
       var defOpt = document.createElement('option'); defOpt.value = ''; defOpt.textContent = c.l; sel.appendChild(defOpt);
       Array.from(sets[c.k]).sort().forEach(function(w) { var o = document.createElement('option'); o.value = w; o.textContent = w; sel.appendChild(o); });
-      if (curFilters[c.k]) sel.value = curFilters[c.k];
-      sel.addEventListener('change', renderT);
+      if (colFilterState[c.k]) sel.value = colFilterState[c.k];
+      sel.addEventListener('change', function(ev) {
+        var s = ev.target;
+        if (s.value) colFilterState[s.dataset.fk] = s.value;
+        else delete colFilterState[s.dataset.fk];
+        renderT();
+      });
       row.appendChild(sel);
     }
     container.appendChild(row);
@@ -1739,6 +1753,7 @@ function resetFilters() {
   document.getElementById('fGroep').value = '';
   var mf = document.getElementById('fMetaFilter'); if (mf) mf.value = '';
   var rf = document.getElementById('fRelease'); if (rf) rf.value = '';
+  colFilterState = {};
   includedExts.clear();
   vulExtChips();
   actMap = null;
@@ -1752,11 +1767,14 @@ function filt() {
   var metaFilter = (document.getElementById('fMetaFilter') || {}).value || '';
   var relFilter = (document.getElementById('fRelease') || {}).value || '';
   var VERPLICHT = ['bedrijf','discipline','titel','document_datum','document_status','document_nummer'];
-  // Verzamel actieve filters dynamisch
-  var activeFilters = [];
+  // Actieve filters: sync DOM → state voor zichtbare selects, gebruik dan state als bron
   document.querySelectorAll('#filterRows select').forEach(function(sel) {
-    if (sel.value && sel.dataset.fk) activeFilters.push({k: sel.dataset.fk, v: sel.value});
+    if (sel.dataset.fk) {
+      if (sel.value) colFilterState[sel.dataset.fk] = sel.value;
+      else delete colFilterState[sel.dataset.fk];
+    }
   });
+  var activeFilters = Object.keys(colFilterState).map(function(k) { return {k: k, v: colFilterState[k]}; });
   var d = docs.filter(function(d) {
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
     if (includedExts.size) {
@@ -2124,7 +2142,12 @@ async function downloadRelease(relId) {
       var dlData = await dlResp.json();
       var resp = await fetch(dlData.url);
       if (!resp.ok) { failed++; continue; }
-      zip.file(f.name || ('file_' + i), await resp.blob());
+      // Gebruik dezelfde mappenstructuur als downloadZIP() uit de doclijst:
+      // haal file_location uit het gematchte doc en verwerk met shortPath()
+      var folder = (doc && doc.file_location) ? shortPath(doc.file_location) : '';
+      var fname = f.name || ('file_' + i);
+      var zipPath = folder ? folder + '/' + fname : fname;
+      zip.file(zipPath, await resp.blob());
       downloaded++;
     } catch(e) { console.warn('[Release DL] Fout:', f.name, e.message); failed++; }
     btn.textContent = '⏳ ' + (downloaded + failed) + '/' + rel.files.length;
