@@ -1201,15 +1201,28 @@ async function tcGetMetadata(projectId, bestanden) {
     console.warn('[TC] PSet definitie ophalen mislukt:', e.message);
   }
 
-  // Haal PSet instances op (nodig voor metadata matching)
-  var psetsResp;
+  // Haal PSet instances op — gepagineerd met Range-header, anders missen
+  // we instances bij grote projecten
+  var instArray = [];
   try {
-    psetsResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets');
+    var start = 0, pageSize = 500, pages = 0;
+    while (true) {
+      var r = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets', {
+        extraHeaders: { 'Range': 'items=' + start + '-' + (start + pageSize - 1) }
+      });
+      var items = (r && r.items) || (Array.isArray(r) ? r : []);
+      pages++;
+      if (!items.length) break;
+      instArray = instArray.concat(items);
+      if (items.length < pageSize) break;
+      start += pageSize;
+      if (pages > 20) { console.warn('[TC] PSet paginatie stop na 20 pages (safety)'); break; }
+    }
+    console.log('[TC] PSet instances opgehaald: ' + instArray.length + ' in ' + pages + ' pages');
   } catch(e) {
     console.warn('[TC] PSet ophalen mislukt:', e.message);
     return;
   }
-  var instArray = psetsResp.items || [];
 
   // Fallback: hardcoded UUIDs (VW BVGO schema)
   if (Object.keys(PROP_MAP).length === 0) {
@@ -1273,21 +1286,23 @@ async function tcGetMetadata(projectId, bestanden) {
   // === EDITABLE_COLS dynamisch opbouwen ===
   buildEditableCols();
 
-  console.log('[TC] ' + instArray.length + ' PSet instances gevonden');
-
   // Bouw lookup: fileVID → bestand
   var lookup = {};
   bestanden.forEach(function(b) { if (b._vid) lookup[b._vid] = b; });
 
   // Map metadata naar bestanden
   var matched = 0;
+  var unmatchedSamples = [];
   for (var j = 0; j < instArray.length; j++) {
     var inst = instArray[j];
-    // link format: "frn:tcfile:{VID}" → extract VID
+    // link format: "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{version}" → extract VID
     var link = inst.link || '';
-    var vid = link.replace('frn:tcfile:', '');
+    var vid = link.replace(/^frn:tcfile:/, '').split('@')[0];
     var b = lookup[vid];
-    if (!b) continue;
+    if (!b) {
+      if (unmatchedSamples.length < 5) unmatchedSamples.push(link);
+      continue;
+    }
     matched++;
     b._canEdit = (inst._actions || []).indexOf('pset:PutPSet') >= 0;
     b._psetLink = link;
@@ -1300,6 +1315,9 @@ async function tcGetMetadata(projectId, bestanden) {
     }
   }
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
+  if (unmatchedSamples.length > 0) {
+    console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet links — voorbeelden:', unmatchedSamples);
+  }
 }
 
 // (Standalone upload verwijderd — alleen TC extensie modus)
