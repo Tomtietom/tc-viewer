@@ -11,8 +11,12 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Poppins',system-ui,-apple-system,sans-serif;background:#fff;color:#222;min-height:100vh;font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
-h1,h2,h3,h4{font-family:'Montserrat',system-ui,sans-serif;letter-spacing:-.02em}
+body{font-family:'Poppins',system-ui,-apple-system,sans-serif;background:#fff;color:#222;min-height:100vh;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+h1,h2,h3,h4{font-family:'Montserrat',system-ui,sans-serif;letter-spacing:-.02em;color:#222}
+/* Accent-woord (website hero-pattern): <em> binnen heading kleurt oranje */
+h1 em,h2 em,h3 em,h4 em,.accent{font-style:normal;color:var(--af)}
+/* Overline-pattern zoals website hero */
+.overline{font-family:'Poppins',sans-serif;font-size:12px;font-weight:600;color:var(--af);text-transform:uppercase;letter-spacing:.15em;margin-bottom:var(--s3)}
 :root{
   /* At Fielt huisstijl — 1:1 overgenomen uit website custom.css */
   --af:#D4821A;--af2:#8a5410;--afl:#F5E6D6;
@@ -37,9 +41,10 @@ h1,h2,h3,h4{font-family:'Montserrat',system-ui,sans-serif;letter-spacing:-.02em}
 }
 
 .hdr{background:var(--dk);color:#fff;padding:var(--s3) var(--s5);display:flex;align-items:center;gap:var(--s2);box-shadow:0 2px 8px rgba(0,0,0,.15);position:sticky;top:0;z-index:100}
-.hdr h1{font-family:'Montserrat',sans-serif;font-size:var(--fs-lg);font-weight:700;white-space:nowrap}
-.hdr .sub{font-size:var(--fs-sm);opacity:.5;margin-left:var(--s1)}
-.hdr .info{font-size:var(--fs-sm);opacity:.7;margin-left:var(--s3)}
+.hdr h1{font-family:'Montserrat',sans-serif;font-size:var(--fs-lg);font-weight:700;white-space:nowrap;color:#fff}
+.hdr h1 em{font-style:normal;color:var(--af);font-weight:700}
+.hdr .sub{font-size:var(--fs-sm);color:var(--af);margin-left:var(--s1);font-weight:600}
+.hdr .info{font-size:var(--fs-sm);color:rgba(255,255,255,.85);margin-left:var(--s3)}
 .hdr .spacer{flex:1}
 .hdr button{padding:6px var(--s3);border:none;border-radius:var(--r-pill);font-size:var(--fs-sm);font-weight:500;cursor:pointer;font-family:'Poppins',sans-serif;transition:all .15s}
 .hdr .back-btn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.15);display:none}
@@ -82,18 +87,24 @@ input[type=file]{display:none}
 .up-group h3{font-size:13px;font-weight:600;margin-bottom:4px}
 .up-group .st{font-size:12px;color:#666}
 .up-group .st.ok{color:var(--ok);font-weight:500}
-.disc{margin-top:var(--s4);padding:10px var(--s4);background:var(--afs);border:1px solid var(--af);border-left:4px solid var(--af);border-radius:var(--r-sm);font-size:var(--fs-xs);color:var(--dk);text-align:left;line-height:1.55}
+.disc{margin-top:var(--s5);padding:var(--s4);background:var(--afl);border-left:4px solid var(--af);border-radius:var(--r-sm);font-size:13px;color:#222;text-align:left;line-height:1.6}
 .disc b{color:var(--af);font-weight:700}
 
 /* TC Loading */
 .pg-loading.active{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;background:linear-gradient(180deg,var(--gr) 0%,#fff 100%)}
-.load-card{background:#fff;border-radius:var(--r-lg);padding:40px var(--s5);max-width:500px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.06)}
-.load-card h2{font-family:'Montserrat',sans-serif;font-weight:800;letter-spacing:-.01em;color:var(--dk);margin-bottom:4px}
-.load-card .tag{color:var(--af);font-size:var(--fs-md);font-weight:500;margin:var(--s1) 0 var(--s4)}
-.load-step{text-align:left;padding:var(--s2) 0;font-size:var(--fs-md);opacity:.4;color:var(--dk)}
-.load-step.active{opacity:1}
-.load-meta{font-size:var(--fs-sm);color:var(--g4);margin-top:var(--s2)}
-.load-err{margin-top:var(--s4);padding:var(--s3) var(--s4);background:#fde8e8;border:1px solid #f5c0c0;border-left:4px solid var(--warn);border-radius:var(--r-sm);color:var(--warn);font-size:var(--fs-sm);text-align:left;line-height:1.5}
+.load-card{background:#fff;border-radius:var(--r-lg);padding:48px var(--s5);max-width:520px;width:100%;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.05)}
+.load-card h2{font-family:'Montserrat',sans-serif;font-weight:800;font-size:32px;letter-spacing:-.02em;line-height:1.1;color:#222;margin-bottom:var(--s3)}
+.load-card h2 em{font-style:normal;color:var(--af)}
+.load-card .load-sub{font-size:16px;color:var(--g4);margin-bottom:var(--s5);line-height:1.6;font-weight:500}
+.load-step{text-align:left;padding:8px 0;font-size:14px;color:var(--g3);display:flex;align-items:center;gap:10px;transition:color .2s}
+.load-step .si{display:inline-block;min-width:18px;text-align:center;font-size:14px}
+.load-step.active{color:#222}
+.load-step.done{color:#222}
+.load-step.done .si{color:var(--af)}
+.load-step.err{color:var(--warn)}
+.load-step.err .si{color:var(--warn)}
+.load-meta{font-size:13px;color:var(--g5);margin-top:var(--s3);font-weight:500}
+.load-err{margin-top:var(--s4);padding:var(--s3) var(--s4);background:#fde8e8;border:1px solid #f5c0c0;border-left:4px solid var(--warn);border-radius:var(--r-sm);color:var(--warn);font-size:13px;text-align:left;line-height:1.5}
 .progress-track{width:100%;height:8px;background:var(--g2);border-radius:4px;margin:var(--s4) 0 var(--s2);overflow:hidden;display:none}
 .progress-fill{height:100%;background:var(--af);border-radius:4px;transition:width .3s}
 
@@ -135,7 +146,7 @@ input[type=file]{display:none}
 .sidebar{width:280px;background:var(--gr);border-right:1px solid var(--hl-light);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
 .sb-filters{overflow-y:auto;flex-shrink:1;min-height:0}
 .sb-sec{padding:var(--s3) var(--s4);border-bottom:1px solid var(--hl-light)}
-.sb-sec h3{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--g4);margin-bottom:var(--s2);font-family:'Montserrat',sans-serif}
+.sb-sec h3{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--g5);margin-bottom:var(--s2);font-family:'Montserrat',sans-serif}
 .sbox{width:100%;padding:8px var(--s3);border:1px solid var(--hl);border-radius:var(--r-sm);font-size:var(--fs-md);font-family:'Poppins',sans-serif;outline:none;transition:border-color .15s;background:#fff}
 .sbox:focus{border-color:var(--af)}
 .frow{display:flex;gap:var(--s1);margin-top:var(--s2)}
@@ -163,7 +174,7 @@ input[type=file]{display:none}
 .tbl-scrl{flex:1;overflow:auto;background:#fff}
 table{width:100%;border-collapse:collapse;font-size:var(--fs-md)}
 thead{position:sticky;top:0;z-index:10}
-thead th{background:var(--gr);color:var(--g6);padding:10px;text-align:left;font-weight:700;font-size:var(--fs-xs);white-space:nowrap;cursor:pointer;user-select:none;position:relative;text-transform:uppercase;letter-spacing:.3px;border-bottom:2px solid var(--af)}
+thead th{background:var(--gr);color:#222;padding:12px;text-align:left;font-weight:700;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;position:relative;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid var(--af);font-family:'Montserrat',sans-serif}
 thead th:hover{background:#EFE6D6;color:var(--af)}
 thead th .col-resize{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;z-index:2}
 thead th .sa{margin-left:3px;opacity:.3;font-size:8px}
@@ -180,7 +191,7 @@ tbody tr.mn3{background:#FDFBF6}
 tbody tr.mn3 td{font-weight:500;font-size:var(--fs-sm);color:var(--g5);border-bottom:1px solid var(--hl-light);padding:7px 12px}
 tbody tr.mn-meta{background:var(--gr)}
 tbody tr.mn-meta td{font-weight:700;font-size:var(--fs-md);color:var(--dk);border-bottom:2px solid var(--af);padding:10px 12px}
-td{padding:10px;vertical-align:top}
+td{padding:11px 12px;vertical-align:top;color:var(--dk)}
 td a{color:var(--dk);text-decoration:none;transition:color .1s}
 td a:hover{color:var(--af);text-decoration:underline}
 .bdg{display:inline-block;padding:3px 10px;border-radius:var(--r-pill);font-size:10px;font-weight:600;white-space:nowrap;letter-spacing:.2px}
@@ -200,7 +211,7 @@ td a:hover{color:var(--af);text-decoration:underline}
 .dp-sec{padding:var(--s3) var(--s4);border-bottom:1px solid var(--hl-light)}
 .dp-sec h4{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--g4);margin:0 0 var(--s2);font-family:'Montserrat',sans-serif}
 .dp-row{display:flex;justify-content:space-between;padding:3px 0;font-size:var(--fs-xs)}
-.dp-row .dl{color:var(--g4)}
+.dp-row .dl{color:var(--g5)}
 .dp-row .dv{font-weight:500;text-align:right;max-width:160px;word-break:break-all}
 .dp-tc{display:block;margin:var(--s3) var(--s4);padding:10px;background:var(--af);color:#fff;border:none;border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:600;cursor:pointer;text-align:center;text-decoration:none;font-family:'Poppins',sans-serif;transition:background .15s}
 .dp-tc:hover{background:var(--af2)}
@@ -227,7 +238,7 @@ td a:hover{color:var(--af);text-decoration:underline}
 .dp-preview iframe{height:320px}
 .dp-preview img{max-height:320px;object-fit:contain}
 .dp-preview .no-prev{font-size:var(--fs-xs);color:var(--g3);text-align:center;padding:20px 0}
-.ftr{padding:6px var(--s5);background:transparent;border-top:1px solid var(--hl-light);font-size:var(--fs-xs);color:var(--g4);display:flex;justify-content:space-between}
+.ftr{padding:8px var(--s5);background:transparent;border-top:1px solid var(--hl-light);font-size:var(--fs-sm);color:var(--g5);display:flex;justify-content:space-between}
 
 /* Sidebar-filter helpers */
 .ext-chips{display:flex;flex-wrap:wrap;gap:var(--s1)}
@@ -284,7 +295,7 @@ td a:hover{color:var(--af);text-decoration:underline}
 <body>
 
 <div class="hdr">
-  <h1>Trimble Connect <span class="sub">Documentenlijst</span></h1>
+  <h1>Trimble Connect <em>Documentenlijst</em></h1>
   <span class="info" id="hdrInfo"></span>
   <span class="spacer"></span>
   <button class="back-btn" id="backBtn" onclick="goBack()">&#8592; Terug</button>
@@ -304,12 +315,13 @@ td a:hover{color:var(--af);text-decoration:underline}
 <!-- TC LOADING -->
 <div class="page pg-loading active" id="pgLoading">
   <div class="load-card">
-    <h2>Documentenlijst laden</h2>
-    <div class="tag" id="tcProjectName"></div>
-    <div id="tcStep1" class="load-step active">&#9203; Verbinden met Trimble Connect...</div>
-    <div id="tcStep2" class="load-step">&#9744; Mappenstructuur ophalen</div>
-    <div id="tcStep3" class="load-step">&#9744; Bestanden ophalen</div>
-    <div id="tcStep4" class="load-step">&#9744; Metadata ophalen</div>
+    <div class="overline">Powered by At Fielt</div>
+    <h2>Documenten<em>lijst</em> laden</h2>
+    <div class="load-sub" id="tcProjectName"></div>
+    <div id="tcStep1" class="load-step active"><span class="si">&#9203;</span><span>Verbinden met Trimble Connect...</span></div>
+    <div id="tcStep2" class="load-step"><span class="si">&#9675;</span><span>Mappenstructuur ophalen</span></div>
+    <div id="tcStep3" class="load-step"><span class="si">&#9675;</span><span>Bestanden ophalen</span></div>
+    <div id="tcStep4" class="load-step"><span class="si">&#9675;</span><span>Metadata ophalen</span></div>
     <div class="progress-track" id="tcProgress"><div class="progress-fill" id="tcProgressFill"></div></div>
     <div id="tcStatusText" class="load-meta"></div>
     <div id="tcError" class="load-err" style="display:none"></div>
@@ -883,10 +895,16 @@ async function tcFetchPSet(path, opts) {
 function tcStep(n, status, text) {
   var el = document.getElementById('tcStep' + n);
   if (!el) return;
-  if (status === 'loading') { el.innerHTML = '&#9203; ' + text; el.className = 'load-step active'; }
-  else if (status === 'done') { el.innerHTML = '&#9989; ' + text; el.className = 'load-step active'; }
-  else if (status === 'error') { el.innerHTML = '&#10060; ' + text; el.className = 'load-step active'; }
-  document.getElementById('tcStatusText').textContent = text;
+  // Icon + label in gescheiden spans — class bepaalt kleur via CSS
+  var icon, cls;
+  if (status === 'loading')      { icon = '&#9203;';  cls = 'load-step active'; }   // hourglass
+  else if (status === 'done')    { icon = '&#10003;'; cls = 'load-step done'; }      // heavy check (niet emoji)
+  else if (status === 'error')   { icon = '&#9888;';  cls = 'load-step err'; }       // warning triangle
+  else                           { icon = '&#9675;';  cls = 'load-step'; }           // open circle (wachten)
+  el.innerHTML = '<span class="si">' + icon + '</span><span>' + text + '</span>';
+  el.className = cls;
+  var statusEl = document.getElementById('tcStatusText');
+  if (statusEl) statusEl.textContent = text;
 }
 
 function tcShowProgress(pct) {
