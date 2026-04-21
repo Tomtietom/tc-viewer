@@ -196,9 +196,13 @@ tbody tr.mn3 td{font-weight:500;font-size:var(--fs-sm);color:var(--g5);border-bo
 tbody tr.mn-meta{background:var(--gr)}
 tbody tr.mn-meta td{font-weight:700;font-size:var(--fs-md);color:var(--dk);border-bottom:2px solid var(--af);padding:10px 12px}
 td{padding:11px 12px;vertical-align:top;color:var(--dk)}
-/* Checkbox-kolom: horizontaal + verticaal gecentreerd */
-.cb-cell{text-align:center;vertical-align:middle;width:36px;padding:0 8px}
-.cb-cell input[type=checkbox]{cursor:pointer;margin:0;vertical-align:middle}
+/* Checkbox-kolom: horizontaal + verticaal gecentreerd — override mn1/mn2/mn3 padding */
+thead th.cb-cell, tbody tr td.cb-cell, tbody tr.mn1 td.cb-cell, tbody tr.mn2 td.cb-cell, tbody tr.mn3 td.cb-cell, tbody tr.mn-meta td.cb-cell{
+  text-align:center; vertical-align:middle; width:40px; padding:0
+}
+td.cb-cell input[type=checkbox], th.cb-cell input[type=checkbox]{
+  cursor:pointer; margin:0; vertical-align:middle; display:inline-block
+}
 td a{color:var(--dk);text-decoration:none;transition:color .1s}
 td a:hover{color:var(--af);text-decoration:underline}
 .bdg{display:inline-block;padding:3px 10px;border-radius:var(--r-pill);font-size:10px;font-weight:600;white-space:nowrap;letter-spacing:.2px}
