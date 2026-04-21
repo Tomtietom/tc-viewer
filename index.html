@@ -176,7 +176,11 @@ table{width:100%;border-collapse:collapse;font-size:var(--fs-md)}
 thead{position:sticky;top:0;z-index:10}
 thead th{background:var(--gr);color:#222;padding:12px;text-align:left;font-weight:700;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;position:relative;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid var(--af);font-family:'Montserrat',sans-serif}
 thead th:hover{background:#EFE6D6;color:var(--af)}
-thead th .col-resize{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;z-index:2}
+thead th .col-resize{position:absolute;right:0;top:0;width:8px;height:100%;cursor:col-resize;z-index:2;transition:background .15s}
+thead th .col-resize:hover{background:var(--af);opacity:.5}
+thead th .col-resize.dragging{background:var(--af);opacity:1}
+/* Live breedte-tooltip tijdens slepen */
+thead th[data-w]::after{content:attr(data-w) "px";position:absolute;top:-28px;right:0;background:var(--dk);color:#fff;padding:3px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;font-family:'Poppins',sans-serif;white-space:nowrap;pointer-events:none;letter-spacing:0}
 thead th .sa{margin-left:3px;opacity:.3;font-size:8px}
 thead th.sorted{color:var(--af)}
 thead th.sorted .sa{opacity:1;color:var(--af)}
@@ -408,6 +412,7 @@ td a:hover{color:var(--af);text-decoration:underline}
         <div id="colChecks"></div>
         <div id="colActions" class="col-actions">
           <button onclick="addMetaCol()" class="sb-btn" style="flex:1">+ Metadata</button>
+          <button onclick="resetColWidths()" class="sb-btn" title="Zet alle kolombreedtes terug naar de standaard">&#8634; Breedtes</button>
         </div>
         <div id="adminColBtn" class="admin-col-btn">
           <button onclick="saveProjectColConfig()" class="admin-save-btn">&#9881; Instellen als project-standaard</button>
@@ -1725,7 +1730,7 @@ function bouwTH() {
   thCb.appendChild(cb); tr.appendChild(thCb);
   COLS.forEach(function(c) {
     var th = document.createElement('th');
-    th.innerHTML = c.l + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+c.k+'\')"></span>';
+    th.innerHTML = c.l + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+c.k+'\')" ondblclick="autoFitColumn(event,\''+c.k+'\')" title="Sleep om te verbreden, dubbelklik om passend te maken"></span>';
     // Opgeslagen breedte of default
     if (colWidths[c.k]) th.style.width = colWidths[c.k];
     else if (c.w) th.style.width = c.w;
@@ -1747,6 +1752,12 @@ function startResize(e, colKey) {
   _resizeTh = e.target.closest('th');
   _resizeStartX = e.clientX;
   _resizeStartW = _resizeTh.offsetWidth;
+  // Visuele feedback tijdens slepen
+  var handle = _resizeTh.querySelector('.col-resize');
+  if (handle) handle.classList.add('dragging');
+  _resizeTh.setAttribute('data-w', _resizeStartW);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
   document.addEventListener('mousemove', doResize);
   document.addEventListener('mouseup', endResize);
 }
@@ -1754,15 +1765,84 @@ function doResize(e) {
   if (!_resizeTh) return;
   var w = Math.max(40, _resizeStartW + (e.clientX - _resizeStartX));
   _resizeTh.style.width = w + 'px';
+  _resizeTh.setAttribute('data-w', w);
+  // Update cg <col> zodat alle rijen meekrimpen/groeien
+  _syncColWidth(_resizeCol, w + 'px');
 }
 function endResize(e) {
   if (_resizeTh && _resizeCol) {
     colWidths[_resizeCol] = _resizeTh.style.width;
     saveColConfig();
+    var handle = _resizeTh.querySelector('.col-resize');
+    if (handle) handle.classList.remove('dragging');
+    _resizeTh.removeAttribute('data-w');
   }
   _resizeCol = null; _resizeTh = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
   document.removeEventListener('mousemove', doResize);
   document.removeEventListener('mouseup', endResize);
+}
+
+// Sync de <colgroup><col> element zodat alle cel-rijen live meebewegen bij drag
+function _syncColWidth(colKey, widthStr) {
+  var cg = document.getElementById('tColGroup');
+  if (!cg) return;
+  var visible = COLS; // volgorde in COLS = volgorde in colgroup (na checkbox-col)
+  var idx = visible.findIndex(function(c) { return c.k === colKey; });
+  if (idx < 0) return;
+  var cols = cg.querySelectorAll('col');
+  // Offset +1 voor de checkbox-col die eerst komt? Laat me checken... bouwTH voegt checkbox-th toe maar colgroup begint met ALL_COLS kolommen
+  // Actuele colgroup begint direct met de data-cols, geen extra checkbox-col.
+  if (cols[idx]) cols[idx].style.width = widthStr;
+}
+
+// Dubbelklik op resize-grip → kolom past zich aan aan breedste content
+function autoFitColumn(e, colKey) {
+  e.preventDefault(); e.stopPropagation();
+  var idx = COLS.findIndex(function(c) { return c.k === colKey; });
+  if (idx < 0) return;
+  // Checkbox-kolom staat links vóór de COLS in tbody tr — dus colgroup-index = COLS-index + 1? Check bouwTH
+  // bouwTH maakt: thCb + COLS.forEach(th). Dus checkbox is kolom 0, datakolom idx is kolom idx+1.
+  // Zelfde voor tbody: elke tr heeft tdCb + COLS.forEach(td). Dus voor auto-fit meten we td op cellIndex = idx + 1.
+  var cellIdx = idx + 1;
+  var maxW = 60;
+  var rows = document.querySelectorAll('#tBody tr');
+  // Meet in een hidden span met dezelfde font-styling
+  var measure = document.createElement('span');
+  measure.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0;margin:0';
+  document.body.appendChild(measure);
+  rows.forEach(function(tr) {
+    // Skip groepsheader-rijen
+    if (tr.classList.contains('mn1') || tr.classList.contains('mn2') || tr.classList.contains('mn3') || tr.classList.contains('mn-meta')) return;
+    var cell = tr.cells[cellIdx];
+    if (!cell) return;
+    measure.textContent = cell.textContent || '';
+    measure.style.font = getComputedStyle(cell).font;
+    var w = measure.offsetWidth;
+    if (w > maxW) maxW = w;
+  });
+  // Meet ook de header
+  var th = document.querySelectorAll('#tHead th')[cellIdx];
+  if (th) {
+    measure.textContent = (th.textContent || '').replace('▲','').trim();
+    measure.style.font = getComputedStyle(th).font;
+    var hw = measure.offsetWidth + 24; // extra ruimte voor sort-arrow + resize-handle
+    if (hw > maxW) maxW = hw;
+  }
+  document.body.removeChild(measure);
+  // Buffer + min/max
+  var finalW = Math.min(400, Math.max(60, maxW + 24));
+  colWidths[colKey] = finalW + 'px';
+  saveColConfig();
+  bouwTH(); renderT();
+}
+
+function resetColWidths() {
+  if (!confirm('Alle kolombreedtes terugzetten naar de standaard?')) return;
+  colWidths = {};
+  saveColConfig();
+  bouwTH(); renderT();
 }
 
 // Helper: waarde van doc voor een kolom (metadata of custom)
