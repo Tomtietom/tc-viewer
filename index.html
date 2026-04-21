@@ -192,6 +192,9 @@ tbody tr.mn3 td{font-weight:500;font-size:var(--fs-sm);color:var(--g5);border-bo
 tbody tr.mn-meta{background:var(--gr)}
 tbody tr.mn-meta td{font-weight:700;font-size:var(--fs-md);color:var(--dk);border-bottom:2px solid var(--af);padding:10px 12px}
 td{padding:11px 12px;vertical-align:top;color:var(--dk)}
+/* Checkbox-kolom: horizontaal + verticaal gecentreerd */
+.cb-cell{text-align:center;vertical-align:middle;width:36px;padding:0 8px}
+.cb-cell input[type=checkbox]{cursor:pointer;margin:0;vertical-align:middle}
 td a{color:var(--dk);text-decoration:none;transition:color .1s}
 td a:hover{color:var(--af);text-decoration:underline}
 .bdg{display:inline-block;padding:3px 10px;border-radius:var(--r-pill);font-size:10px;font-weight:600;white-space:nowrap;letter-spacing:.2px}
@@ -1716,7 +1719,7 @@ function bouwTH() {
 
   var tr = document.createElement('tr');
   // Checkbox kolom (altijd zichtbaar voor selectie/delen)
-  var thCb = document.createElement('th'); thCb.style.cssText = 'text-align:center;padding:2px 4px 2px 8px';
+  var thCb = document.createElement('th'); thCb.className = 'cb-cell';
   var cb = document.createElement('input'); cb.type = 'checkbox';
   cb.onchange = function() { var checked = cb.checked; var visible = filt(); visible.forEach(function(d) { if (checked) selectedDocs.add(d._vid); else selectedDocs.delete(d._vid); }); updateSelection(); document.querySelectorAll('.doc-cb').forEach(function(c) { c.checked = selectedDocs.has(c.dataset.vid); }); };
   thCb.appendChild(cb); tr.appendChild(thCb);
@@ -1883,7 +1886,7 @@ function renderT() {
       if (selDoc===doc) tr.classList.add('sel');
 
       // Checkbox (altijd zichtbaar)
-      var tdCb = document.createElement('td'); tdCb.style.cssText = 'text-align:center;padding:2px 4px 2px 8px';
+      var tdCb = document.createElement('td'); tdCb.className = 'cb-cell';
       var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = selectedDocs.has(doc._vid);
       cb.className = 'doc-cb'; cb.dataset.vid = doc._vid;
       cb.onchange = function(e) { e.stopPropagation(); if (cb.checked) selectedDocs.add(doc._vid); else selectedDocs.delete(doc._vid); updateSelection(); };
