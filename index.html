@@ -1044,6 +1044,9 @@ async function tcAutoFetchData() {
     // === RELEASES OPHALEN ===
     try { await fetchReleases(); } catch(e) { console.warn('[TC] Releases mislukt:', e.message); }
 
+    // === AUTOCOMPLETE-VOORSTELLEN opbouwen ===
+    try { bouwDatalists(); } catch(e) { console.warn('[TC] Datalists bouwen mislukt:', e.message); }
+
     // === DIAGNOSTIEK: metadata check ===
     var metaDocs = docs.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; });
     console.log('[TC] Docs met metadata:', metaDocs.length, '/', docs.length);
@@ -1892,10 +1895,11 @@ function renderT() {
             sel.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, sel.value, sel); };
             td.appendChild(sel);
           } else {
-            // Text input
+            // Text input — voor vrije tekstvelden autocomplete via datalist
             var inp = document.createElement('input'); inp.type = c.k === 'document_datum' ? 'date' : 'text';
             inp.value = v;
             inp.style.cssText = 'width:100%;padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif;box-sizing:border-box';
+            if (inp.type === 'text') inp.setAttribute('list', 'dl_' + c.k);
             inp.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, inp.value, inp); };
             inp.onclick = function(e) { e.stopPropagation(); };
             td.appendChild(inp);
@@ -2492,7 +2496,7 @@ function renderBulkValueInput() {
   } else if (field === 'document_datum' || field.indexOf('datum') >= 0) {
     wrap.innerHTML = '<input id="bulkValue" type="date" class="eb-input">';
   } else {
-    wrap.innerHTML = '<input id="bulkValue" type="text" placeholder="Typ de waarde..." class="eb-input">';
+    wrap.innerHTML = '<input id="bulkValue" type="text" list="dl_' + field + '" placeholder="Typ de waarde..." class="eb-input">';
   }
 }
 
@@ -2546,6 +2550,8 @@ async function bulkSave() {
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     toSave.forEach(function(doc) { doc[field] = value; });
     saved = toSave.length;
+    // Nieuwe waarde direct als autocomplete-voorstel beschikbaar maken
+    try { bouwDatalists(); } catch(_) {}
   } catch(e) {
     console.warn('[TC] Bulk opslaan mislukt:', e.message);
     saveError = e.message;
@@ -2592,6 +2598,8 @@ async function saveCell(doc, field, value, el) {
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
+    // Nieuwe waarde direct als autocomplete-voorstel beschikbaar maken
+    try { bouwDatalists(); } catch(_) {}
     // Visuele feedback: succes = groen, na 1.5s terug naar normaal
     if (el) {
       el.style.borderColor = '#22c55e';
