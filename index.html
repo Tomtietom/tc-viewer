@@ -280,7 +280,7 @@ td a:hover{text-decoration:underline}
     <div id="editBar" style="display:none;padding:6px 12px;background:#fff8f0;border-bottom:1px solid #f0dcc8;font-size:12px;align-items:center;gap:10px">
       <span id="editSelCount" style="font-weight:600;color:var(--af)"></span>
       <select id="bulkField" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px"></select>
-      <select id="bulkValue" style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;max-width:160px"></select>
+      <span id="bulkValueWrap" style="display:inline-flex"><input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled style="padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;max-width:180px;font-family:Poppins,sans-serif"></span>
       <button onclick="bulkSave()" style="padding:3px 10px;background:var(--af);color:#fff;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Toepassen</button>
       <span id="bulkStatus" style="font-size:11px;color:#888"></span>
     </div>
@@ -2226,26 +2226,49 @@ function vulBulkFields() {
     var o = document.createElement('option'); o.value = c.k; o.textContent = c.l; bf.appendChild(o);
   });
   bf.value = cur;
+  // Herbouw het waarde-input element op basis van het huidige veld
+  renderBulkValueInput();
+}
+
+// Bouw het juiste invoer-element voor het gekozen bulk-veld
+function renderBulkValueInput() {
+  var bf = document.getElementById('bulkField');
+  var wrap = document.getElementById('bulkValueWrap');
+  if (!bf || !wrap) return;
+  var field = bf.value;
+  var commonStyle = 'padding:3px 6px;border:1px solid #ddd;border-radius:4px;font-size:11px;max-width:180px;font-family:Poppins,sans-serif';
+  if (!field) {
+    wrap.innerHTML = '<input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled style="' + commonStyle + '">';
+    return;
+  }
+  if (ENUM_VALUES[field]) {
+    // Dropdown met enum-waarden
+    var opts = '<option value="">Waarde kiezen...</option>';
+    ENUM_VALUES[field].forEach(function(v) { opts += '<option value="' + v.replace(/"/g, '&quot;') + '">' + v + '</option>'; });
+    wrap.innerHTML = '<select id="bulkValue" style="' + commonStyle + '">' + opts + '</select>';
+  } else if (field === 'document_datum' || field.indexOf('datum') >= 0) {
+    // Datum-picker
+    wrap.innerHTML = '<input id="bulkValue" type="date" style="' + commonStyle + '">';
+  } else {
+    // Vrije tekst
+    wrap.innerHTML = '<input id="bulkValue" type="text" placeholder="Typ de waarde..." style="' + commonStyle + ';min-width:180px">';
+  }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
   var bf = document.getElementById('bulkField');
-  if (bf) bf.addEventListener('change', function() {
-    var bv = document.getElementById('bulkValue');
-    bv.innerHTML = '<option value="">Waarde kiezen...</option>';
-    var field = bf.value;
-    if (ENUM_VALUES[field]) {
-      ENUM_VALUES[field].forEach(function(v) { var o = document.createElement('option'); o.value = v; o.textContent = v; bv.appendChild(o); });
-    } else {
-      bv.innerHTML = '<option value="">Typ in de tabel</option>';
-    }
-  });
+  if (bf) bf.addEventListener('change', renderBulkValueInput);
 });
 
 async function bulkSave() {
   var field = document.getElementById('bulkField').value;
-  var value = document.getElementById('bulkValue').value;
-  if (!field || !value) { alert('Kies een veld en waarde'); return; }
+  var valueEl = document.getElementById('bulkValue');
+  var value = valueEl ? valueEl.value : '';
+  if (!field) { alert('Kies een veld'); return; }
+  // Lege tekst is legitiem (veld wissen) — vraag bevestiging
+  if (!value) {
+    if (!confirm('Geen waarde ingevuld. Wil je het veld "' + field + '" leegmaken bij de geselecteerde bestanden?')) return;
+  }
 
   var propId = null;
   for (var id in PROP_MAP) { if (PROP_MAP[id] === field) { propId = id; break; } }
@@ -2253,6 +2276,7 @@ async function bulkSave() {
 
   var statusEl = document.getElementById('bulkStatus');
   var toSave = docs.filter(function(d) { return selectedDocs.has(d._vid) && d._canEdit; });
+  if (!toSave.length) { alert('Geen bewerkbare bestanden geselecteerd'); return; }
   statusEl.textContent = 'Opslaan: 0/' + toSave.length;
 
   var libId = 'tcproject:prod:' + pid;
