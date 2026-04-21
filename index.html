@@ -2283,6 +2283,36 @@ function buildEditableCols() {
   console.log('[TC] EDITABLE_COLS dynamisch:', EDITABLE_COLS.length, 'velden', EDITABLE_COLS);
 }
 
+// === AUTOCOMPLETE-VOORSTELLEN (datalist per vrij tekstveld) ===
+// Martin's feedback: gebruiker wil voorstellen op basis van bestaande waardes,
+// niet een hardgecodeerde keuzelijst. Vrijheid om nieuwe waarde te typen blijft.
+function bouwDatalists() {
+  var pool = document.getElementById('dlPool');
+  if (!pool) return;
+  // Autocomplete alleen voor vrije tekstvelden: geen enum, geen datum
+  var autoFields = (EDITABLE_COLS || []).filter(function(k) {
+    return !ENUM_VALUES[k] && k.indexOf('datum') === -1;
+  });
+  // 'tags' is geen PSet-veld maar wel een tekst-kolom waarvoor suggesties handig zijn
+  if (autoFields.indexOf('tags') === -1 && ALL_COLS.some(function(c) { return c.k === 'tags'; })) {
+    autoFields.push('tags');
+  }
+  var waarden = {};
+  autoFields.forEach(function(k) { waarden[k] = new Set(); });
+  docs.forEach(function(d) {
+    autoFields.forEach(function(k) {
+      var v = (d[k] || '').toString().trim();
+      if (v && v !== '--') waarden[k].add(v);
+    });
+  });
+  pool.innerHTML = autoFields.map(function(k) {
+    var opts = Array.from(waarden[k]).sort(function(a, b) { return a.localeCompare(b, 'nl'); })
+      .map(function(v) { return '<option value="' + v.replace(/"/g, '&quot;') + '">'; }).join('');
+    return '<datalist id="dl_' + k + '">' + opts + '</datalist>';
+  }).join('');
+  console.log('[TC] Datalists gebouwd voor', autoFields.length, 'velden');
+}
+
 // === PROJECT KOLOM-CONFIG VIA HUB ===
 var HUB_BASE = 'https://atfielt-extension-hub.tom-da0.workers.dev';
 var isProjectAdmin = false;
@@ -2908,5 +2938,7 @@ async function submitRelease() {
 // === START ===
 initTCExtension();
 </script>
+<!-- Autocomplete-voorstellen voor vrije tekstvelden (dynamisch gevuld door bouwDatalists) -->
+<div id="dlPool" style="display:none"></div>
 </body>
 </html>
