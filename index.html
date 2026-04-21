@@ -1788,13 +1788,11 @@ function endResize(e) {
 function _syncColWidth(colKey, widthStr) {
   var cg = document.getElementById('tColGroup');
   if (!cg) return;
-  var visible = COLS; // volgorde in COLS = volgorde in colgroup (na checkbox-col)
-  var idx = visible.findIndex(function(c) { return c.k === colKey; });
+  var idx = COLS.findIndex(function(c) { return c.k === colKey; });
   if (idx < 0) return;
+  // bouwTH zet checkbox-col op positie 0, data-cols op positie 1+
   var cols = cg.querySelectorAll('col');
-  // Offset +1 voor de checkbox-col die eerst komt? Laat me checken... bouwTH voegt checkbox-th toe maar colgroup begint met ALL_COLS kolommen
-  // Actuele colgroup begint direct met de data-cols, geen extra checkbox-col.
-  if (cols[idx]) cols[idx].style.width = widthStr;
+  if (cols[idx + 1]) cols[idx + 1].style.width = widthStr;
 }
 
 // Dubbelklik op resize-grip → kolom past zich aan aan breedste content
