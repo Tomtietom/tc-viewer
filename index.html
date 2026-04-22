@@ -2393,17 +2393,22 @@ function buildEditableCols() {
 // === AUTOCOMPLETE-VOORSTELLEN (datalist per vrij tekstveld) ===
 // Martin's feedback: gebruiker wil voorstellen op basis van bestaande waardes,
 // niet een hardgecodeerde keuzelijst. Vrijheid om nieuwe waarde te typen blijft.
+function getAutocompleteFields() {
+  var fields = (EDITABLE_COLS || []).filter(function(k) {
+    return !ENUM_VALUES[k] && k.indexOf('datum') === -1;
+  });
+  if (fields.indexOf('tags') === -1 && ALL_COLS.some(function(c) { return c.k === 'tags'; })) {
+    fields.push('tags');
+  }
+  return fields;
+}
+
+// Volledige rebuild — alleen bij initiële data-load, NIET na elke save
+// (innerHTML-thrashing terwijl gebruiker in een input-veld zit = browser vastloop)
 function bouwDatalists() {
   var pool = document.getElementById('dlPool');
   if (!pool) return;
-  // Autocomplete alleen voor vrije tekstvelden: geen enum, geen datum
-  var autoFields = (EDITABLE_COLS || []).filter(function(k) {
-    return !ENUM_VALUES[k] && k.indexOf('datum') === -1;
-  });
-  // 'tags' is geen PSet-veld maar wel een tekst-kolom waarvoor suggesties handig zijn
-  if (autoFields.indexOf('tags') === -1 && ALL_COLS.some(function(c) { return c.k === 'tags'; })) {
-    autoFields.push('tags');
-  }
+  var autoFields = getAutocompleteFields();
   var waarden = {};
   autoFields.forEach(function(k) { waarden[k] = new Set(); });
   docs.forEach(function(d) {
@@ -2412,12 +2417,34 @@ function bouwDatalists() {
       if (v && v !== '--') waarden[k].add(v);
     });
   });
-  pool.innerHTML = autoFields.map(function(k) {
-    var opts = Array.from(waarden[k]).sort(function(a, b) { return a.localeCompare(b, 'nl'); })
-      .map(function(v) { return '<option value="' + v.replace(/"/g, '&quot;') + '">'; }).join('');
-    return '<datalist id="dl_' + k + '">' + opts + '</datalist>';
-  }).join('');
+  // Via DOM-API, geen innerHTML-string (veiliger bij <, >, &, " in waarden)
+  while (pool.firstChild) pool.removeChild(pool.firstChild);
+  autoFields.forEach(function(k) {
+    var dl = document.createElement('datalist');
+    dl.id = 'dl_' + k;
+    Array.from(waarden[k]).sort(function(a, b) { return a.localeCompare(b, 'nl'); }).forEach(function(v) {
+      var opt = document.createElement('option');
+      opt.value = v;
+      dl.appendChild(opt);
+    });
+    pool.appendChild(dl);
+  });
   console.log('[TC] Datalists gebouwd voor', autoFields.length, 'velden');
+}
+
+// Incrementele update — veilig tijdens bewerken, geen reflow-storm
+function addDatalistValue(field, value) {
+  var v = (value || '').toString().trim();
+  if (!v || v === '--' || !field) return;
+  var dl = document.getElementById('dl_' + field);
+  if (!dl) return;
+  // Optie bestaat al?
+  for (var i = 0; i < dl.options.length; i++) {
+    if (dl.options[i].value === v) return;
+  }
+  var opt = document.createElement('option');
+  opt.value = v;
+  dl.appendChild(opt);
 }
 
 // === PROJECT KOLOM-CONFIG VIA HUB ===
@@ -2653,8 +2680,8 @@ async function bulkSave() {
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     toSave.forEach(function(doc) { doc[field] = value; });
     saved = toSave.length;
-    // Nieuwe waarde direct als autocomplete-voorstel beschikbaar maken
-    try { bouwDatalists(); } catch(_) {}
+    // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
+    try { addDatalistValue(field, value); } catch(_) {}
   } catch(e) {
     console.warn('[TC] Bulk opslaan mislukt:', e.message);
     saveError = e.message;
@@ -2701,8 +2728,8 @@ async function saveCell(doc, field, value, el) {
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
-    // Nieuwe waarde direct als autocomplete-voorstel beschikbaar maken
-    try { bouwDatalists(); } catch(_) {}
+    // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
+    try { addDatalistValue(field, value); } catch(_) {}
     // Visuele feedback: succes = groen, na 1.5s terug naar normaal
     if (el) {
       el.style.borderColor = '#22c55e';
