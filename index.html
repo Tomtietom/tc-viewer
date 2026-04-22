@@ -196,9 +196,9 @@ tbody tr.mn3 td{font-weight:500;font-size:var(--fs-sm);color:var(--g5);border-bo
 tbody tr.mn-meta{background:var(--gr)}
 tbody tr.mn-meta td{font-weight:700;font-size:var(--fs-md);color:var(--dk);border-bottom:2px solid var(--af);padding:10px 12px}
 td{padding:11px 12px;vertical-align:middle;color:var(--dk)}
-/* Checkbox-kolom: horizontaal + verticaal gecentreerd — override mn1/mn2/mn3 padding */
+/* Checkbox-kolom: 12px links tot rand = 12px rechts tot bestandsnaam tekst */
 thead th.cb-cell, tbody tr td.cb-cell, tbody tr.mn1 td.cb-cell, tbody tr.mn2 td.cb-cell, tbody tr.mn3 td.cb-cell, tbody tr.mn-meta td.cb-cell{
-  text-align:center; vertical-align:middle; width:40px; padding:0
+  text-align:left; vertical-align:middle; width:32px; padding:0 0 0 12px
 }
 td.cb-cell input[type=checkbox], th.cb-cell input[type=checkbox]{
   cursor:pointer; margin:0; vertical-align:middle; display:inline-block
@@ -1723,7 +1723,7 @@ function bouwTH() {
   var h = document.getElementById('tHead'); h.innerHTML = '';
   // Colgroup voor kolombreedte
   var cg = document.getElementById('tColGroup'); cg.innerHTML = '';
-  var cbCol = document.createElement('col'); cbCol.style.width = '40px'; cg.appendChild(cbCol);
+  var cbCol = document.createElement('col'); cbCol.style.width = '32px'; cg.appendChild(cbCol);
   COLS.forEach(function(c) { var col = document.createElement('col'); if (colWidths[c.k]) col.style.width = colWidths[c.k]; else if (c.w) col.style.width = c.w; cg.appendChild(col); });
 
   var tr = document.createElement('tr');
