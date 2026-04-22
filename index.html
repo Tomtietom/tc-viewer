@@ -436,7 +436,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <span id="editSelCount" class="eb-count"></span>
       <span class="eb-sep"></span>
       <select id="bulkField" class="eb-input"></select>
-      <span id="bulkValueWrap" class="eb-value-wrap"><input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled class="eb-input"></span>
+      <span id="bulkValueWrap" class="eb-value-wrap"><input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled autocomplete="off" class="eb-input"></span>
       <button onclick="bulkSave()" class="eb-apply">Toepassen</button>
       <span id="bulkStatus" class="eb-status"></span>
     </div>
@@ -1999,9 +1999,12 @@ function renderT() {
             td.appendChild(sel);
           } else {
             // Text input — voor vrije tekstvelden autocomplete via datalist
+            // autocomplete="off" voorkomt dat de browser cross-project
+            // geheugen (history-autofill) voorstelt naast onze datalist
             var inp = document.createElement('input'); inp.type = c.k === 'document_datum' ? 'date' : 'text';
             inp.value = v;
             inp.style.cssText = 'width:100%;padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif;box-sizing:border-box';
+            inp.setAttribute('autocomplete', 'off');
             if (inp.type === 'text') inp.setAttribute('list', 'dl_' + c.k);
             inp.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, inp.value, inp); };
             inp.onclick = function(e) { e.stopPropagation(); };
@@ -2616,7 +2619,7 @@ function renderBulkValueInput() {
   if (!bf || !wrap) return;
   var field = bf.value;
   if (!field) {
-    wrap.innerHTML = '<input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled class="eb-input">';
+    wrap.innerHTML = '<input id="bulkValue" type="text" placeholder="Kies eerst een veld..." disabled autocomplete="off" class="eb-input">';
     return;
   }
   if (ENUM_VALUES[field]) {
@@ -2624,9 +2627,9 @@ function renderBulkValueInput() {
     ENUM_VALUES[field].forEach(function(v) { opts += '<option value="' + v.replace(/"/g, '&quot;') + '">' + v + '</option>'; });
     wrap.innerHTML = '<select id="bulkValue" class="eb-input">' + opts + '</select>';
   } else if (field === 'document_datum' || field.indexOf('datum') >= 0) {
-    wrap.innerHTML = '<input id="bulkValue" type="date" class="eb-input">';
+    wrap.innerHTML = '<input id="bulkValue" type="date" autocomplete="off" class="eb-input">';
   } else {
-    wrap.innerHTML = '<input id="bulkValue" type="text" list="dl_' + field + '" placeholder="Typ de waarde..." class="eb-input">';
+    wrap.innerHTML = '<input id="bulkValue" type="text" list="dl_' + field + '" placeholder="Typ de waarde..." autocomplete="off" class="eb-input">';
   }
 }
 
