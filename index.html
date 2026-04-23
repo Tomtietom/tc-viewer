@@ -1344,14 +1344,34 @@ async function tcGetMetadata(projectId, bestanden) {
   // Map metadata naar bestanden
   var matched = 0;
   var unmatchedSamples = [];
+  // Extra lookup: probeer ook via 'name' te matchen als fallback
+  // (niet alle PSet instances hangen met FRN aan file-vid, soms aan versie)
+  var nameLookup = {};
+  bestanden.forEach(function(b) {
+    if (b.bestandsnaam) {
+      var key = (b.file_location || '') + '/' + b.bestandsnaam;
+      nameLookup[key.toLowerCase()] = b;
+    }
+  });
+  var nonFileLinks = 0;
   for (var j = 0; j < instArray.length; j++) {
     var inst = instArray[j];
-    // link format: "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{version}" → extract VID
     var link = inst.link || '';
-    var vid = link.replace(/^frn:tcfile:/, '').split('@')[0];
-    var b = lookup[vid];
+    var b = null;
+    // Primair: match op file-VID uit link "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{version}"
+    if (/^frn:tcfile:/.test(link)) {
+      var vid = link.replace(/^frn:tcfile:/, '').split('@')[0];
+      b = lookup[vid] || null;
+    } else {
+      nonFileLinks++;
+    }
+    // Fallback: match op padnaam als de instance een 'name' of 'path' veld heeft
+    if (!b && (inst.name || inst.path || inst.fileName)) {
+      var nkey = ((inst.path || '') + '/' + (inst.name || inst.fileName || '')).toLowerCase();
+      b = nameLookup[nkey] || null;
+    }
     if (!b) {
-      if (unmatchedSamples.length < 5) unmatchedSamples.push(link);
+      if (unmatchedSamples.length < 8) unmatchedSamples.push({link: link, name: inst.name || null, path: inst.path || null, propKeys: Object.keys(inst.props || {}).length});
       continue;
     }
     matched++;
@@ -1367,7 +1387,9 @@ async function tcGetMetadata(projectId, bestanden) {
   }
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
   if (unmatchedSamples.length > 0) {
-    console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet links — voorbeelden:', unmatchedSamples);
+    console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ')');
+    console.warn('[TC] Unmatched voorbeelden:', JSON.stringify(unmatchedSamples, null, 2));
+    console.warn('[TC] Lookup heeft', Object.keys(lookup).length, 'file-vids. Voorbeeld VID:', Object.keys(lookup)[0]);
   }
 }
 
