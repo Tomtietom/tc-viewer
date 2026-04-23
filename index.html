@@ -2975,16 +2975,28 @@ var _releaseDocs = [];
 var _releaseVersionCache = {};
 
 // Haalt versies van 1 bestand op via TC API.
-// Probeert meerdere endpoints — TC API verschilt per regio/versie.
+// Via Cloudflare-proxy omdat TC geen CORS heeft op /versions en /files/fs/{id}/versions
 async function fetchFileVersions(vid) {
   if (_releaseVersionCache[vid]) return _releaseVersionCache[vid];
+  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu'
+               : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
   var endpoints = [
-    '/versions?fileId=' + encodeURIComponent(vid),
-    '/files/fs/' + encodeURIComponent(vid) + '/versions',
+    PROXY_BASE + '/tc/' + tcRegion + '/versions?fileId=' + encodeURIComponent(vid),
+    PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + encodeURIComponent(vid) + '/versions',
   ];
   for (var i = 0; i < endpoints.length; i++) {
     try {
-      var data = await tcFetch(endpoints[i]);
+      await _ensureValidToken();
+      var url = endpoints[i];
+      var doFetch = function() {
+        return fetchWithTimeout(url, {
+          headers: { 'Authorization': 'Bearer ' + tcToken, 'Accept': 'application/json' }
+        });
+      };
+      var resp = await doFetch();
+      if (resp.status === 401) { await _ensureValidToken(); resp = await doFetch(); }
+      if (!resp.ok) continue;
+      var data = await resp.json();
       var arr = Array.isArray(data) ? data : (data && data.items) || [];
       if (arr.length) {
         _releaseVersionCache[vid] = arr;
