@@ -234,7 +234,22 @@ td a:hover{color:var(--af);text-decoration:underline}
 .modal input,.modal textarea,.modal select{width:100%;padding:8px var(--s3);border:1px solid var(--hl);border-radius:var(--r-sm);font-size:var(--fs-md);font-family:'Poppins',sans-serif;box-sizing:border-box;outline:none;transition:border-color .15s}
 .modal input:focus,.modal textarea:focus,.modal select:focus{border-color:var(--af)}
 .modal textarea{height:80px;resize:vertical}
-.modal .file-list{background:var(--g1);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:var(--fs-xs);color:var(--g5);max-height:100px;overflow-y:auto;margin-bottom:var(--s1)}
+.modal .file-list{background:var(--g1);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:var(--fs-xs);color:var(--g5);max-height:180px;overflow-y:auto;margin-bottom:var(--s1)}
+/* Release-dialog per-bestand rij met versie-info/picker */
+.rf-row{display:flex;align-items:center;gap:var(--s2);padding:4px 0;border-bottom:1px solid var(--hl-light);position:relative}
+.rf-row:last-child{border:none}
+.rf-row .rf-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--g6)}
+.rf-v-load{font-size:10px;color:var(--g3);font-style:italic}
+.rf-v-single{font-size:10px;color:var(--g3)}
+.rf-v-pill{font-size:10px;padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--hl);background:#fff;color:var(--g5);cursor:pointer;font-weight:500;user-select:none;white-space:nowrap}
+.rf-v-pill:hover{border-color:var(--af);color:var(--af)}
+.rf-v-pill.rf-v-custom{border-color:var(--af);background:var(--afl);color:var(--af);font-weight:600}
+.rf-v-picker{position:absolute;top:100%;right:0;z-index:10;background:#fff;border:1px solid var(--hl);border-radius:var(--r-sm);box-shadow:0 4px 12px rgba(0,0,0,.12);min-width:260px;max-height:240px;overflow-y:auto;margin-top:2px}
+.rf-v-opt{padding:6px 10px;font-size:11px;color:var(--g6);cursor:pointer;border-bottom:1px solid var(--hl-light)}
+.rf-v-opt:last-child{border:none}
+.rf-v-opt:hover{background:var(--afl);color:var(--af)}
+.rf-v-opt.sel{background:var(--af);color:#fff;font-weight:600}
+.rf-v-opt.sel:hover{background:var(--af2);color:#fff}
 .modal .btn-row{display:flex;gap:var(--s2);margin-top:var(--s4)}
 .modal .btn-primary{flex:1;padding:10px;background:var(--af);color:#fff;border:none;border-radius:var(--r-sm);font-size:var(--fs-md);font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;transition:background .15s}
 .modal .btn-primary:hover{background:var(--af2)}
@@ -2956,15 +2971,91 @@ function openShareInMail() {
 
 // === RELEASE BEHEER ===
 var _releaseDocs = [];
+// Per bestand: { vid: [{id, version, createdOn, createdBy}, ...] }
+var _releaseVersionCache = {};
+
+// Haalt versies van 1 bestand op via TC API.
+// Probeert meerdere endpoints — TC API verschilt per regio/versie.
+async function fetchFileVersions(vid) {
+  if (_releaseVersionCache[vid]) return _releaseVersionCache[vid];
+  var endpoints = [
+    '/versions?fileId=' + encodeURIComponent(vid),
+    '/files/fs/' + encodeURIComponent(vid) + '/versions',
+  ];
+  for (var i = 0; i < endpoints.length; i++) {
+    try {
+      var data = await tcFetch(endpoints[i]);
+      var arr = Array.isArray(data) ? data : (data && data.items) || [];
+      if (arr.length) {
+        _releaseVersionCache[vid] = arr;
+        return arr;
+      }
+    } catch (e) { /* probeer volgende endpoint */ }
+  }
+  _releaseVersionCache[vid] = [];
+  return [];
+}
+
+// Render de bestandenlijst in de release-dialog met versie-info.
+// - 1 versie: toont alleen "laatste (vX)" als info
+// - Meer versies: toont pill met huidige keuze (default = laatste) + klikbaar voor dropdown
+function renderReleaseFileList() {
+  var list = document.getElementById('releaseFileList');
+  if (!list) return;
+  var rows = _releaseDocs.map(function(d, idx) {
+    var versions = d._versions || [];
+    var latest = versions[0]; // TC API geeft nieuwste eerst
+    var selectedId = d._selectedVersionId || (latest && (latest.id || latest.versionId)) || '';
+    var isLatest = !d._selectedVersionId || (latest && (latest.id || latest.versionId) === selectedId);
+    var hasMany = versions.length > 1;
+    var versieInfo;
+    if (d._versionsLoading) {
+      versieInfo = '<span class="rf-v-load">versies laden…</span>';
+    } else if (!hasMany) {
+      versieInfo = '<span class="rf-v-single">laatste versie</span>';
+    } else {
+      var selVer = versions.find(function(v) { return (v.id || v.versionId) === selectedId; }) || latest;
+      var label = (isLatest ? 'laatste' : 'v' + (selVer.version || selVer.revision || '?')) + ' van ' + versions.length;
+      versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleReleaseVerPicker(' + idx + ')">' + label + ' ▾</span>'
+        + '<div class="rf-v-picker" id="rfvp_' + idx + '" style="display:none"></div>';
+    }
+    return '<div class="rf-row"><span class="rf-name" title="' + d.bestandsnaam.replace(/"/g,'&quot;') + '">' + d.bestandsnaam + '</span>' + versieInfo + '</div>';
+  });
+  list.innerHTML = rows.join('');
+}
+
+function toggleReleaseVerPicker(idx) {
+  var d = _releaseDocs[idx];
+  var el = document.getElementById('rfvp_' + idx);
+  if (!el || !d || !d._versions) return;
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  var latestId = (d._versions[0].id || d._versions[0].versionId);
+  el.innerHTML = d._versions.map(function(v, vi) {
+    var vid = v.id || v.versionId;
+    var isLatest = vi === 0;
+    var selected = (d._selectedVersionId || latestId) === vid;
+    var dt = (v.createdOn || v.modifiedOn || '').substring(0, 10);
+    var by = v.createdBy && v.createdBy.fullName ? ' — ' + v.createdBy.fullName : (typeof v.createdBy === 'string' ? ' — ' + v.createdBy : '');
+    var vlabel = 'v' + (v.version || v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
+    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + vid + '\',' + isLatest + ')">' + vlabel + ' — ' + dt + by + '</div>';
+  }).join('');
+  el.style.display = 'block';
+}
+
+function pickReleaseVersion(idx, versionId, isLatest) {
+  var d = _releaseDocs[idx];
+  if (!d) return;
+  d._selectedVersionId = isLatest ? null : versionId; // null = laatste (default behaviour)
+  var el = document.getElementById('rfvp_' + idx);
+  if (el) el.style.display = 'none';
+  renderReleaseFileList();
+}
 
 function openReleaseDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
   if (!selDocs.length) { alert('Selecteer eerst bestanden'); return; }
-  _releaseDocs = selDocs;
-  // Bestandslijst
-  var list = document.getElementById('releaseFileList');
-  var namen = selDocs.map(function(d) { return d.bestandsnaam; });
-  list.textContent = namen.length <= 10 ? namen.join('\n') : namen.slice(0, 10).join('\n') + '\n... en ' + (namen.length - 10) + ' meer';
+  _releaseDocs = selDocs.map(function(d) { return Object.assign({}, d, { _versions: null, _versionsLoading: true, _selectedVersionId: null }); });
+  renderReleaseFileList();
   // Vul dropdown met open releases
   var sel = document.getElementById('releaseSelect');
   sel.innerHTML = '<option value="">Kies een release...</option><option value="__new__">+ Nieuwe release aanmaken</option>';
@@ -2980,6 +3071,27 @@ function openReleaseDialog() {
   document.getElementById('releaseForm').style.display = '';
   document.getElementById('releaseSuccess').style.display = 'none';
   document.getElementById('releaseModal').classList.add('vis');
+  // Haal versies parallel op — zodra klaar update de UI per bestand
+  loadReleaseVersions();
+}
+
+async function loadReleaseVersions() {
+  var snapshot = _releaseDocs.slice();
+  // Parallel met cap van 10 tegelijk om TC API niet te overspoelen
+  var BATCH = 10;
+  for (var b = 0; b < snapshot.length; b += BATCH) {
+    var batch = snapshot.slice(b, b + BATCH);
+    await Promise.all(batch.map(async function(d) {
+      try {
+        var vs = await fetchFileVersions(d._vid);
+        d._versions = vs;
+      } catch (e) {
+        d._versions = [];
+      }
+      d._versionsLoading = false;
+    }));
+    renderReleaseFileList();
+  }
 }
 
 function toggleNewRelease() {
@@ -3035,8 +3147,15 @@ async function submitRelease() {
       relName = existingRel ? existingRel.name : '';
     }
 
-    // Bestanden toevoegen aan release
-    var fileItems = _releaseDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; });
+    // Bestanden toevoegen aan release — voeg versionId toe als gebruiker een
+    // niet-laatste versie heeft gekozen. Default (null) = TC pakt laatste.
+    var fileItems = _releaseDocs.map(function(d) {
+      var item = { id: d._vid, type: 'FILE' };
+      if (d._selectedVersionId) item.versionId = d._selectedVersionId;
+      return item;
+    });
+    var custom = _releaseDocs.filter(function(d) { return d._selectedVersionId; }).length;
+    if (custom) console.log('[Release] ' + custom + '/' + _releaseDocs.length + ' bestanden met aangepaste versie');
     var addUrl = PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files';
     var doAdd = function() {
       return fetchWithTimeout(addUrl, {
