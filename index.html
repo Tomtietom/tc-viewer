@@ -1029,7 +1029,7 @@ function vulDocs(files) {
       discipline: b.discipline||'', document_soort: b.document_soort||'',
       titel: b.titel||'', tags: b.tags||'',
       contract_status: b.contract_status||'', controlestatus: b.controlestatus||'',
-      controleverzoek: b.controleverzoek||'', _vid: b._vid||'', _versie: b._versie||'',
+      controleverzoek: b.controleverzoek||'', _vid: b._vid||'', _versionId: b._versionId||b._vid||'', _versie: b._versie||'',
       _created: b._created||'', _modified: b._modified||'',
       _canEdit: b._canEdit !== false, _psetLink: b._psetLink||'frn:tcfile:'+(b._vid||''),
     };
@@ -1202,7 +1202,7 @@ async function tcGetItemsRecursive(folderId, pad, result) {
       folderIdByPath[volledigPad] = item.id;
       subFolders.push({ id: item.id, pad: volledigPad });
     } else {
-      result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '', _versie: item.revision || item.version || '' });
+      result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _versionId: item.versionId || item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '', _versie: item.revision || item.version || '' });
     }
   }
   _fetchedFolders++;
@@ -1307,6 +1307,9 @@ async function tcGetMetadata(projectId, bestanden) {
   // we instances bij grote projecten
   var instArray = [];
   try {
+    // Let op: TC legt zelf een max op per call (observatie: 100), ongeacht onze Range-header.
+    // Dus stop alleen bij een lege response — NIET bij items.length < pageSize (dat triggerde
+    // voorheen te vroeg bij projecten met meer instances).
     var start = 0, pageSize = 500, pages = 0;
     while (true) {
       var r = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets', {
@@ -1316,9 +1319,8 @@ async function tcGetMetadata(projectId, bestanden) {
       pages++;
       if (!items.length) break;
       instArray = instArray.concat(items);
-      if (items.length < pageSize) break;
-      start += pageSize;
-      if (pages > 20) { console.warn('[TC] PSet paginatie stop na 20 pages (safety)'); break; }
+      start += items.length; // offset op basis van daadwerkelijk ontvangen aantal
+      if (pages > 50) { console.warn('[TC] PSet paginatie stop na 50 pages (safety)'); break; }
     }
     console.log('[TC] PSet instances opgehaald: ' + instArray.length + ' in ' + pages + ' pages');
   } catch(e) {
@@ -1388,22 +1390,25 @@ async function tcGetMetadata(projectId, bestanden) {
   // === EDITABLE_COLS dynamisch opbouwen ===
   buildEditableCols();
 
-  // Bouw lookup: fileVID → bestand
-  var lookup = {};
-  bestanden.forEach(function(b) { if (b._vid) lookup[b._vid] = b; });
-
-  // Map metadata naar bestanden
-  var matched = 0;
-  var unmatchedSamples = [];
-  // Extra lookup: probeer ook via 'name' te matchen als fallback
-  // (niet alle PSet instances hangen met FRN aan file-vid, soms aan versie)
-  var nameLookup = {};
+  // Bouw meerdere lookups zodat PSet-links op elke manier kunnen matchen:
+  // - lookup:       fileVID (item.id)
+  // - versionLookup: versionId van de actuele versie
+  // - nameLookup:   pad/naam als laatste fallback
+  // TC hangt PSet-metadata vaak aan de versionId, niet aan de fileId.
+  var lookup = {}, versionLookup = {}, nameLookup = {};
   bestanden.forEach(function(b) {
+    if (b._vid) lookup[b._vid] = b;
+    if (b._versionId) versionLookup[b._versionId] = b;
     if (b.bestandsnaam) {
       var key = (b.file_location || '') + '/' + b.bestandsnaam;
       nameLookup[key.toLowerCase()] = b;
     }
   });
+
+  // Map metadata naar bestanden
+  var matched = 0;
+  var matchedByVid = 0, matchedByVersion = 0, matchedByName = 0;
+  var unmatchedSamples = [];
   var nonFileLinks = 0;
   // Diagnostische snapshot voor de 'Diagnose kopiëren'-knop
   _metaDiag = {
@@ -1422,18 +1427,21 @@ async function tcGetMetadata(projectId, bestanden) {
     var inst = instArray[j];
     var link = inst.link || '';
     var b = null;
-    // Primair: match op file-VID uit link "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{version}"
+    var matchVia = null;
+    // Link-formaat: "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{versie}"
+    // De VID is vaak de versionId, niet de fileId — daarom proberen we beide lookups.
     if (/^frn:tcfile:/.test(link)) {
       var vid = link.replace(/^frn:tcfile:/, '').split('@')[0];
-      b = lookup[vid] || null;
+      if (lookup[vid]) { b = lookup[vid]; matchVia = 'vid'; }
+      else if (versionLookup[vid]) { b = versionLookup[vid]; matchVia = 'version'; }
     } else {
       nonFileLinks++;
       _metaDiag.nonFileLinks = nonFileLinks;
     }
-    // Fallback: match op padnaam als de instance een 'name' of 'path' veld heeft
+    // Fallback: match op padnaam (alleen als TC dat veld meegeeft)
     if (!b && (inst.name || inst.path || inst.fileName)) {
       var nkey = ((inst.path || '') + '/' + (inst.name || inst.fileName || '')).toLowerCase();
-      b = nameLookup[nkey] || null;
+      if (nameLookup[nkey]) { b = nameLookup[nkey]; matchVia = 'name'; }
     }
     if (!b) {
       var sample = {link: link, name: inst.name || null, path: inst.path || null, propKeys: Object.keys(inst.props || {}).length};
@@ -1442,6 +1450,9 @@ async function tcGetMetadata(projectId, bestanden) {
       continue;
     }
     matched++;
+    if (matchVia === 'vid') matchedByVid++;
+    else if (matchVia === 'version') matchedByVersion++;
+    else if (matchVia === 'name') matchedByName++;
     b._canEdit = (inst._actions || []).indexOf('pset:PutPSet') >= 0;
     b._psetLink = link;
     var props = inst.props || {};
@@ -1453,7 +1464,10 @@ async function tcGetMetadata(projectId, bestanden) {
     }
   }
   _metaDiag.matched = matched;
-  console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
+  _metaDiag.matchedByVid = matchedByVid;
+  _metaDiag.matchedByVersion = matchedByVersion;
+  _metaDiag.matchedByName = matchedByName;
+  console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
   if (unmatchedSamples.length > 0) {
     console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ')');
     console.warn('[TC] Unmatched voorbeelden:', JSON.stringify(unmatchedSamples, null, 2));
@@ -1840,7 +1854,7 @@ function _mergeNewFilesIntoDocs(newFiles) {
         document_status: '', bedrijf: '', bouwdeel: '', bouwnummer: '',
         discipline: '', document_soort: '', titel: '', tags: '',
         contract_status: '', controlestatus: '', controleverzoek: '',
-        _vid: f._vid, _versie: f._versie || '',
+        _vid: f._vid, _versionId: f._versionId || f._vid, _versie: f._versie || '',
         _created: f._created || '', _modified: f._modified || '',
         _canEdit: true, _psetLink: 'frn:tcfile:' + f._vid, _releases: ''
       });
@@ -2784,6 +2798,9 @@ function kopieerDiagnose(btn) {
   tekst += 'Docs met zichtbare metadata: ' + docsWithMeta + '\n';
   tekst += 'PSet instances opgehaald: ' + (d.instances != null ? d.instances : '?') + '\n';
   tekst += 'Daarvan gematched: ' + (d.matched != null ? d.matched : '?') + '\n';
+  if (d.matchedByVid != null || d.matchedByVersion != null || d.matchedByName != null) {
+    tekst += '  via fileId: ' + (d.matchedByVid || 0) + ', via versionId: ' + (d.matchedByVersion || 0) + ', via naam: ' + (d.matchedByName || 0) + '\n';
+  }
   tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
   tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
   tekst += 'Lookup VIDs: ' + (d.lookupVids || 0) + ' | voorbeeld: ' + JSON.stringify(d.lookupVidSample || []) + '\n\n';
