@@ -3074,15 +3074,20 @@ var _releaseDocs = [];
 // Per bestand: { vid: [{id, version, createdOn, createdBy}, ...] }
 var _releaseVersionCache = {};
 
-// Haalt versies van 1 bestand op via TC API.
-// Via Cloudflare-proxy omdat TC geen CORS heeft op /versions en /files/fs/{id}/versions
+// Haalt versies van 1 bestand op via het correcte TC endpoint:
+// GET /files/{fileId}/versions?tokenThumburl=false
+// Response is een array met versie-objecten, nieuwste eerst, veldnamen:
+// { id (=fileId), versionId, revision, name, createdOn, createdBy{firstName,lastName,...}, ... }
 async function fetchFileVersions(vid) {
   if (_releaseVersionCache[vid]) return _releaseVersionCache[vid];
   var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu'
                : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  var path = '/files/' + encodeURIComponent(vid) + '/versions?tokenThumburl=false';
+  // Eerst direct TC proberen — sommige TC endpoints hebben CORS open.
+  // Als dat faalt, via de Cloudflare-proxy.
   var endpoints = [
-    PROXY_BASE + '/tc/' + tcRegion + '/versions?fileId=' + encodeURIComponent(vid),
-    PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + encodeURIComponent(vid) + '/versions',
+    TC_BASE + path,
+    PROXY_BASE + '/tc/' + tcRegion + path,
   ];
   for (var i = 0; i < endpoints.length; i++) {
     try {
@@ -3090,7 +3095,11 @@ async function fetchFileVersions(vid) {
       var url = endpoints[i];
       var doFetch = function() {
         return fetchWithTimeout(url, {
-          headers: { 'Authorization': 'Bearer ' + tcToken, 'Accept': 'application/json' }
+          headers: {
+            'Authorization': 'Bearer ' + tcToken,
+            'Accept': 'application/json',
+            'x-trimbleconnect-client': 'TCWEB'
+          }
         });
       };
       var resp = await doFetch();
@@ -3117,8 +3126,9 @@ function renderReleaseFileList() {
   var rows = _releaseDocs.map(function(d, idx) {
     var versions = d._versions || [];
     var latest = versions[0]; // TC API geeft nieuwste eerst
-    var selectedId = d._selectedVersionId || (latest && (latest.id || latest.versionId)) || '';
-    var isLatest = !d._selectedVersionId || (latest && (latest.id || latest.versionId) === selectedId);
+    var latestVersionId = latest && latest.versionId;
+    var selectedId = d._selectedVersionId || latestVersionId || '';
+    var isLatest = !d._selectedVersionId || latestVersionId === selectedId;
     var hasMany = versions.length > 1;
     var versieInfo;
     if (d._versionsLoading) {
@@ -3126,8 +3136,8 @@ function renderReleaseFileList() {
     } else if (!hasMany) {
       versieInfo = '<span class="rf-v-single">laatste versie</span>';
     } else {
-      var selVer = versions.find(function(v) { return (v.id || v.versionId) === selectedId; }) || latest;
-      var label = (isLatest ? 'laatste' : 'v' + (selVer.version || selVer.revision || '?')) + ' van ' + versions.length;
+      var selVer = versions.find(function(v) { return v.versionId === selectedId; }) || latest;
+      var label = (isLatest ? 'laatste' : 'v' + (selVer.revision || '?')) + ' van ' + versions.length;
       versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleReleaseVerPicker(' + idx + ')">' + label + ' ▾</span>'
         + '<div class="rf-v-picker" id="rfvp_' + idx + '" style="display:none"></div>';
     }
@@ -3136,20 +3146,30 @@ function renderReleaseFileList() {
   list.innerHTML = rows.join('');
 }
 
+function _creatorNaam(cb) {
+  if (!cb) return '';
+  if (typeof cb === 'string') return cb;
+  var delen = [];
+  if (cb.firstName) delen.push(cb.firstName);
+  if (cb.lastName) delen.push(cb.lastName);
+  if (delen.length) return delen.join(' ');
+  return cb.fullName || cb.email || '';
+}
+
 function toggleReleaseVerPicker(idx) {
   var d = _releaseDocs[idx];
   var el = document.getElementById('rfvp_' + idx);
   if (!el || !d || !d._versions) return;
   if (el.style.display === 'block') { el.style.display = 'none'; return; }
-  var latestId = (d._versions[0].id || d._versions[0].versionId);
+  var latestVersionId = d._versions[0].versionId;
   el.innerHTML = d._versions.map(function(v, vi) {
-    var vid = v.id || v.versionId;
     var isLatest = vi === 0;
-    var selected = (d._selectedVersionId || latestId) === vid;
+    var selected = (d._selectedVersionId || latestVersionId) === v.versionId;
     var dt = (v.createdOn || v.modifiedOn || '').substring(0, 10);
-    var by = v.createdBy && v.createdBy.fullName ? ' — ' + v.createdBy.fullName : (typeof v.createdBy === 'string' ? ' — ' + v.createdBy : '');
-    var vlabel = 'v' + (v.version || v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
-    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + vid + '\',' + isLatest + ')">' + vlabel + ' — ' + dt + by + '</div>';
+    var by = _creatorNaam(v.createdBy);
+    if (by) by = ' — ' + by;
+    var vlabel = 'v' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
+    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">' + vlabel + ' — ' + dt + by + '</div>';
   }).join('');
   el.style.display = 'block';
 }
