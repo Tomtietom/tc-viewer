@@ -219,6 +219,8 @@ td a:hover{color:var(--af);text-decoration:underline}
 .dp-hd h3{color:var(--dk)}
 .dp-hd h3{font-size:var(--fs-md);font-weight:600;font-family:'Montserrat',sans-serif;word-break:break-all}
 .dp-hd .dp-path{font-size:var(--fs-xs);color:var(--g4);margin-top:3px;word-break:break-all}
+.dp-hd .dp-path-link{color:var(--g4);text-decoration:none;border-bottom:1px dotted var(--g3);transition:color .15s}
+.dp-hd .dp-path-link:hover{color:var(--af);border-bottom-color:var(--af)}
 .dp-sec{padding:var(--s3) var(--s4);border-bottom:1px solid var(--hl-light)}
 .dp-sec h4{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--g4);margin:0 0 var(--s2);font-family:'Montserrat',sans-serif}
 .dp-row{display:flex;justify-content:space-between;padding:3px 0;font-size:var(--fs-xs)}
@@ -319,6 +321,17 @@ td a:hover{color:var(--af);text-decoration:underline}
 .admin-col-btn{display:none;margin-top:var(--s3);padding-top:var(--s3);border-top:1px dashed var(--hl-light)}
 .admin-save-btn{width:100%;padding:8px var(--s3);border:1px solid var(--af);border-radius:var(--r-sm);background:var(--afl);color:var(--af);cursor:pointer;font-family:'Poppins',sans-serif;font-weight:600;font-size:var(--fs-xs);transition:all .15s}
 .admin-save-btn:hover{background:var(--af);color:#fff}
+
+/* Updates-banner (nieuwe/gewijzigde docs gedetecteerd) */
+.updates-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#fff8e1;border-bottom:1px solid #f0dcc8;font-size:var(--fs-sm);color:var(--g6)}
+.updates-banner .ub-icon{font-size:14px}
+.updates-banner .ub-text{flex:1;font-weight:500}
+.updates-banner .ub-btn{padding:4px var(--s3);border:1px solid var(--hl);border-radius:var(--r-sm);background:#fff;color:var(--g5);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
+.updates-banner .ub-btn:hover{border-color:var(--af);color:var(--af)}
+.updates-banner .ub-btn.ub-primary{background:var(--af);color:#fff;border-color:var(--af);font-weight:600}
+.updates-banner .ub-btn.ub-primary:hover{background:var(--af2);border-color:var(--af2)}
+.updates-banner .ub-close{cursor:pointer;font-size:16px;color:var(--g4);padding:0 var(--s1);user-select:none}
+.updates-banner .ub-close:hover{color:var(--warn)}
 
 /* Edit-bar bovenin tabel (in edit mode) */
 .edit-bar{display:none;padding:var(--s2) var(--s4);background:var(--afl);border-bottom:1px solid var(--afs);font-size:var(--fs-sm);align-items:center;gap:var(--s3)}
@@ -463,6 +476,13 @@ td a:hover{color:var(--af);text-decoration:underline}
     <div class="tree" id="treeList"></div>
   </div>
   <div class="main">
+    <div id="updatesBanner" class="updates-banner" style="display:none">
+      <span class="ub-icon">&#128276;</span>
+      <span class="ub-text" id="updatesBannerText"></span>
+      <button class="ub-btn" onclick="toonNieuweDocs()">Toon</button>
+      <button class="ub-btn ub-primary" onclick="vernieuwenData()">Vernieuwen</button>
+      <span class="ub-close" onclick="sluitUpdatesBanner()" title="Verbergen">&times;</span>
+    </div>
     <div id="editBar" class="edit-bar">
       <span id="editSelCount" class="eb-count"></span>
       <span class="eb-sep"></span>
@@ -475,7 +495,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -1153,6 +1173,9 @@ async function tcAutoFetchData() {
     }
     // [HUB] einde
 
+    // Auto-refresh setup: check bij tab-focus + elke 10 min
+    setupAutoRefresh();
+
   } catch(e) {
     console.error('[TC] Auto-fetch fout:', e);
     if (docs.length > 0) {
@@ -1676,13 +1699,196 @@ function bouwBoom() {
     });
   })(boom, tree);
 }
-function mkTR(naam, cnt, depth, hasCh) {
+function mkTR(naam, cnt, depth, hasCh, pad) {
   var w = document.createElement('div'), row = document.createElement('div'); row.className = 'tr-row';
+  if (pad !== undefined) row.dataset.pad = pad;
   var tog = hasCh ? '<span class="tr-tog'+(depth<=0?' open':'')+'" onclick="event.stopPropagation();togN(this)">&#9654;</span>' : '<span class="tr-tog"></span>';
   row.innerHTML = tog+'<span class="tr-ico">'+(depth<=0?'&#128193;':'&#128194;')+'</span><span class="tr-nm">'+naam+'</span><span class="tr-cnt">'+cnt+'</span>';
   w.appendChild(row); return w;
 }
 function togN(el) { el.classList.toggle('open'); var ch = el.closest('.tr-row').parentElement.nextElementSibling; if (ch && ch.classList.contains('tr-ch')) ch.classList.toggle('hide'); }
+
+// === AUTO-REFRESH + UPDATES BANNER ===
+// Toont een banner als er nieuwe of gewijzigde documenten zijn gedetecteerd.
+// Verandert niets aan de UI totdat de gebruiker zelf op "Vernieuwen" klikt.
+var _updatesSnapshot = null; // { toegevoegd: [vids], gewijzigd: [vids], allFiles: [...] }
+var _updatesFilter = false;  // filter-flag in filt() zodat toonNieuweDocs() werkt
+var _autoRefreshTimer = null;
+var _isChecking = false;
+
+function setupAutoRefresh() {
+  if (_autoRefreshTimer) clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer = setInterval(checkForUpdates, 10 * 60 * 1000); // 10 min fallback
+  // Trigger check wanneer tab weer zichtbaar wordt
+  if (!window._autoRefreshVisHandler) {
+    window._autoRefreshVisHandler = function() {
+      if (document.visibilityState === 'visible') checkForUpdates();
+    };
+    document.addEventListener('visibilitychange', window._autoRefreshVisHandler);
+  }
+}
+
+async function checkForUpdates() {
+  if (!pid || !tcToken || _isChecking) return;
+  _isChecking = true;
+  try {
+    var projData = await tcFetch('/projects/' + pid);
+    var root = projData.rootId;
+    if (!root) return;
+    var newFiles = [];
+    await tcGetItemsRecursive(root, '', newFiles);
+    // Vergelijk met huidige docs[]: _vid + _modified
+    var oldMap = {};
+    docs.forEach(function(d) { oldMap[d._vid] = d._modified || ''; });
+    var toegevoegd = [], gewijzigd = [];
+    newFiles.forEach(function(f) {
+      if (!f._vid) return;
+      if (!oldMap.hasOwnProperty(f._vid)) toegevoegd.push(f._vid);
+      else if ((f._modified || '') !== oldMap[f._vid]) gewijzigd.push(f._vid);
+    });
+    if (toegevoegd.length + gewijzigd.length > 0) {
+      _updatesSnapshot = { toegevoegd: toegevoegd, gewijzigd: gewijzigd, allFiles: newFiles };
+      toonUpdatesBanner();
+    } else if (_updatesSnapshot) {
+      // Geen wijzigingen meer (bv. gebruiker heeft al ververst) — banner opruimen
+      sluitUpdatesBanner();
+      _updatesSnapshot = null;
+    }
+  } catch (e) {
+    console.warn('[TC] checkForUpdates mislukt:', e.message);
+  } finally {
+    _isChecking = false;
+  }
+}
+
+function toonUpdatesBanner() {
+  var b = document.getElementById('updatesBanner');
+  var t = document.getElementById('updatesBannerText');
+  if (!b || !t || !_updatesSnapshot) return;
+  var n = _updatesSnapshot.toegevoegd.length;
+  var g = _updatesSnapshot.gewijzigd.length;
+  var delen = [];
+  if (n) delen.push(n + ' nieuw');
+  if (g) delen.push(g + ' gewijzigd');
+  t.textContent = (n + g) + ' document' + ((n + g) === 1 ? '' : 'en') + ' gedetecteerd (' + delen.join(', ') + ')';
+  b.style.display = 'flex';
+}
+
+function sluitUpdatesBanner() {
+  var b = document.getElementById('updatesBanner');
+  if (b) b.style.display = 'none';
+}
+
+// Filter de tabel tijdelijk op alleen de nieuwe/gewijzigde docs.
+// Werkt door de nieuwe bestanden éérst toe te voegen aan docs[] zodat ze zichtbaar zijn.
+function toonNieuweDocs() {
+  if (!_updatesSnapshot) return;
+  // Merge nieuwe/gewijzigde bestanden in docs[] zodat ze te zien zijn
+  _mergeNewFilesIntoDocs(_updatesSnapshot.allFiles);
+  // Activeer filter
+  _updatesFilter = true;
+  actMap = null;
+  document.getElementById('searchBox').value = '';
+  document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
+  var alle = document.querySelector('.tr-row'); if (alle) alle.classList.add('act');
+  bouwBoom();
+  renderT();
+}
+
+// Volledig ververs: nieuwe data laden + metadata + releases + UI opnieuw opbouwen
+async function vernieuwenData() {
+  var btn = document.querySelector('#updatesBanner .ub-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Bezig...'; }
+  try {
+    var newFiles = _updatesSnapshot ? _updatesSnapshot.allFiles : null;
+    if (!newFiles) {
+      var projData = await tcFetch('/projects/' + pid);
+      newFiles = [];
+      await tcGetItemsRecursive(projData.rootId, '', newFiles);
+    }
+    vulDocs(newFiles);
+    try { await tcGetMetadata(pid, newFiles); vulDocs(newFiles); } catch (e) { console.warn('[TC] Metadata refresh mislukt:', e.message); }
+    try { await fetchReleases(); } catch (e) { console.warn('[TC] Releases refresh mislukt:', e.message); }
+    try { bouwDatalists(); } catch (_) {}
+    _updatesSnapshot = null;
+    _updatesFilter = false;
+    sluitUpdatesBanner();
+    bouwBoom();
+    vulFilters();
+    bouwTH();
+    renderT();
+    console.log('[TC] Data ververst, docs:', docs.length);
+  } catch (e) {
+    alert('Vernieuwen mislukt: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Vernieuwen'; }
+  }
+}
+
+// Voeg nieuwe bestanden toe aan docs[] en update gewijzigde (zonder hele UI te vernieuwen)
+function _mergeNewFilesIntoDocs(newFiles) {
+  var byVid = {};
+  docs.forEach(function(d, i) { byVid[d._vid] = i; });
+  newFiles.forEach(function(f) {
+    if (!f._vid) return;
+    if (byVid.hasOwnProperty(f._vid)) {
+      // Update _modified enz. (niet de hele doc — metadata blijft intact)
+      var d = docs[byVid[f._vid]];
+      d._modified = f._modified || d._modified;
+      d._versie = f._versie || d._versie;
+    } else {
+      // Nieuw: voeg toe aan docs[]
+      docs.push({
+        file_location: f.file_location || '', bestandsnaam: f.bestandsnaam || '',
+        document_nummer: '', project_fase: '', document_datum: '', revisie: '',
+        document_status: '', bedrijf: '', bouwdeel: '', bouwnummer: '',
+        discipline: '', document_soort: '', titel: '', tags: '',
+        contract_status: '', controlestatus: '', controleverzoek: '',
+        _vid: f._vid, _versie: f._versie || '',
+        _created: f._created || '', _modified: f._modified || '',
+        _canEdit: true, _psetLink: 'frn:tcfile:' + f._vid, _releases: ''
+      });
+    }
+  });
+  // Ververs mapS
+  mapS = {};
+  docs.forEach(function(d) { if (!d.file_location) d.file_location = '(root)'; if (!mapS[d.file_location]) mapS[d.file_location] = []; mapS[d.file_location].push(d); });
+}
+
+// Navigeer naar een map vanuit het detail-paneel (klikbaar pad).
+// Zelfde gedrag als klikken op de map in de mappenboom.
+function navigateNaarMap(e, loc) {
+  if (e) e.preventDefault();
+  if (!loc) return;
+  // Filter docs op deze map + submappen
+  actMap = Object.keys(mapS).filter(function(m) { return m === loc || m.startsWith(loc + '/'); });
+  if (!actMap.length) { actMap = null; return; }
+  // Tree highlight: vind de bijbehorende .tr-row via data-pad
+  document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
+  var sel = 'tr-row-match';
+  var treeItems = document.querySelectorAll('.tr-row');
+  var target = null;
+  treeItems.forEach(function(r) { if (r.dataset.pad === loc) target = r; });
+  if (target) {
+    target.classList.add('act');
+    // Open alle verborgen parent-groepen zodat het item zichtbaar is
+    var parent = target.parentElement;
+    while (parent) {
+      if (parent.classList && parent.classList.contains('tr-ch')) {
+        parent.classList.remove('hide');
+        // De toggle-pijl van de parent ook openen
+        var parentRow = parent.previousElementSibling && parent.previousElementSibling.querySelector('.tr-row');
+        if (parentRow) {
+          var tog = parentRow.querySelector('.tr-tog');
+          if (tog) tog.classList.add('open');
+        }
+      }
+      parent = parent.parentElement;
+    }
+    try { target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
+  }
+  renderT();
+}
 
 // === KOLOM UI ===
 function switchColProfile(prof) {
@@ -1948,6 +2154,7 @@ function resetFilters() {
   var rf = document.getElementById('fRelease'); if (rf) rf.value = '';
   colFilterState = {};
   includedExts.clear();
+  _updatesFilter = false;
   vulExtChips();
   actMap = null;
   document.querySelectorAll('.tr-row').forEach(function(r) { r.classList.remove('act'); });
@@ -1968,7 +2175,16 @@ function filt() {
     }
   });
   var activeFilters = Object.keys(colFilterState).map(function(k) { return {k: k, v: colFilterState[k]}; });
+  // Updates-filter heeft voorrang: toon alleen nieuwe/gewijzigde docs
+  var useUpdatesFilter = _updatesFilter && _updatesSnapshot;
+  var updatesVids = null;
+  if (useUpdatesFilter) {
+    updatesVids = {};
+    _updatesSnapshot.toegevoegd.forEach(function(v) { updatesVids[v] = 1; });
+    _updatesSnapshot.gewijzigd.forEach(function(v) { updatesVids[v] = 1; });
+  }
   var d = docs.filter(function(d) {
+    if (useUpdatesFilter && !updatesVids[d._vid]) return false;
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
     if (includedExts.size) {
       var e = getExt(d.bestandsnaam);
@@ -2143,7 +2359,14 @@ function toonDetail(doc) {
   selDoc = doc;
   document.getElementById('dPan').classList.add('vis');
   document.querySelector('#dpHd h3').textContent = doc.bestandsnaam;
-  document.querySelector('#dpHd .dp-path').textContent = doc.file_location;
+  var pathEl = document.querySelector('#dpHd .dp-path');
+  var pathLoc = doc.file_location || '';
+  if (pathLoc && pathLoc !== '(root)') {
+    var escaped = pathLoc.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    pathEl.innerHTML = '<a href="#" class="dp-path-link" onclick="navigateNaarMap(event,' + JSON.stringify(pathLoc) + ')" title="Klik om naar deze map te navigeren">' + escaped + '</a>';
+  } else {
+    pathEl.textContent = pathLoc;
+  }
   var velden = [['Document nummer',doc.document_nummer],['Titel',doc.titel],['Bouwdeel',doc.bouwdeel],['Discipline',doc.discipline],['Fase',doc.project_fase],['Status',doc.document_status],['Revisie',doc.revisie],['Datum',doc.document_datum],['Bedrijf',doc.bedrijf],['Document soort',doc.document_soort],['Tags',doc.tags]];
   var html = '<div class="dp-sec"><h4>Metadata</h4>';
   velden.forEach(function(f) { if (f[1]) { var d=f[1]; if (f[0]==='Status') d=sBdg(f[1]); html += '<div class="dp-row"><span class="dl">'+f[0]+'</span><span class="dv">'+d+'</span></div>'; } });
