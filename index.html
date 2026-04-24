@@ -264,7 +264,10 @@ td a:hover{color:var(--af);text-decoration:underline}
 .dp-preview iframe{height:320px}
 .dp-preview img{max-height:320px;object-fit:contain}
 .dp-preview .no-prev{font-size:var(--fs-xs);color:var(--g3);text-align:center;padding:20px 0}
-.ftr{padding:8px var(--s5);background:transparent;border-top:1px solid var(--hl-light);font-size:var(--fs-sm);color:var(--g5);display:flex;justify-content:space-between}
+.ftr{padding:8px var(--s5);background:transparent;border-top:1px solid var(--hl-light);font-size:var(--fs-sm);color:var(--g5);display:flex;justify-content:space-between;align-items:center;gap:var(--s3)}
+.ftr .diag-btn{padding:3px 10px;border:1px solid var(--hl);border-radius:var(--r-pill);background:#fff;color:var(--g4);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s;white-space:nowrap}
+.ftr .diag-btn:hover{border-color:var(--af);color:var(--af);background:var(--afl)}
+.ftr .diag-btn.ok{border-color:var(--ok);color:var(--ok);background:var(--okbg)}
 
 /* Sidebar-filter helpers */
 .ext-chips{display:flex;flex-wrap:wrap;gap:var(--s1)}
@@ -459,7 +462,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -1354,6 +1357,19 @@ async function tcGetMetadata(projectId, bestanden) {
     }
   });
   var nonFileLinks = 0;
+  // Diagnostische snapshot voor de 'Diagnose kopiëren'-knop
+  _metaDiag = {
+    projectId: pid,
+    projectNaam: (tcProject && tcProject.name) || '',
+    bestanden: bestanden.length,
+    instances: instArray.length,
+    propMapVelden: Object.keys(PROP_MAP).length,
+    lookupVids: Object.keys(lookup).length,
+    lookupVidSample: Object.keys(lookup).slice(0, 3),
+    unmatched: [],
+    nonFileLinks: 0,
+    bouwtijd: new Date().toISOString()
+  };
   for (var j = 0; j < instArray.length; j++) {
     var inst = instArray[j];
     var link = inst.link || '';
@@ -1364,6 +1380,7 @@ async function tcGetMetadata(projectId, bestanden) {
       b = lookup[vid] || null;
     } else {
       nonFileLinks++;
+      _metaDiag.nonFileLinks = nonFileLinks;
     }
     // Fallback: match op padnaam als de instance een 'name' of 'path' veld heeft
     if (!b && (inst.name || inst.path || inst.fileName)) {
@@ -1371,7 +1388,9 @@ async function tcGetMetadata(projectId, bestanden) {
       b = nameLookup[nkey] || null;
     }
     if (!b) {
-      if (unmatchedSamples.length < 8) unmatchedSamples.push({link: link, name: inst.name || null, path: inst.path || null, propKeys: Object.keys(inst.props || {}).length});
+      var sample = {link: link, name: inst.name || null, path: inst.path || null, propKeys: Object.keys(inst.props || {}).length};
+      if (unmatchedSamples.length < 8) unmatchedSamples.push(sample);
+      if (_metaDiag.unmatched.length < 20) _metaDiag.unmatched.push(sample);
       continue;
     }
     matched++;
@@ -1385,6 +1404,7 @@ async function tcGetMetadata(projectId, bestanden) {
       }
     }
   }
+  _metaDiag.matched = matched;
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances');
   if (unmatchedSamples.length > 0) {
     console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ')');
@@ -1493,6 +1513,8 @@ var SKIP_FILTER = ['bestandsnaam','document_nummer','revisie','document_datum','
 var includedExts = new Set();
 // Persistente filter-state per kolom — overleeft profile-switch en rerender van #filterRows
 var colFilterState = {};
+// Diagnose-snapshot van laatste metadata-run (voor 'Diagnose kopiëren' knop)
+var _metaDiag = null;
 
 function getExt(naam) {
   var n = (naam || '').toLowerCase();
@@ -2423,6 +2445,62 @@ var ENUM_VALUES = {
 };
 // Dynamisch: elk veld in PROP_MAP is bewerkbaar (wordt gevuld na metadata ophalen)
 var EDITABLE_COLS = [];
+// Kopieer diagnose-rapport naar clipboard zodat gebruikers support-tickets
+// kunnen aanmaken zonder DevTools te openen.
+function kopieerDiagnose(btn) {
+  var d = _metaDiag || {};
+  var docsWithMeta = docs.filter(function(x) { return x.document_status || x.discipline || x.bedrijf || x.titel; }).length;
+  var sampleDocs = docs.slice(0, 3).map(function(x) {
+    return { vid: x._vid, bestandsnaam: x.bestandsnaam, map: x.file_location, heeftStatus: !!x.document_status, heeftBedrijf: !!x.bedrijf };
+  });
+  var tekst = 'At Fielt Documentenlijst — diagnose-rapport\n';
+  tekst += '=========================================\n';
+  tekst += 'Tijd: ' + new Date().toISOString() + '\n';
+  tekst += 'Project: ' + (d.projectNaam || '?') + ' (id: ' + (d.projectId || '?') + ')\n';
+  tekst += 'Extensie-versie: tomtietom.github.io/tc-viewer\n';
+  tekst += 'Browser: ' + navigator.userAgent + '\n\n';
+  tekst += 'BESTANDEN & METADATA\n';
+  tekst += '--------------------\n';
+  tekst += 'Totaal bestanden: ' + docs.length + '\n';
+  tekst += 'Docs met zichtbare metadata: ' + docsWithMeta + '\n';
+  tekst += 'PSet instances opgehaald: ' + (d.instances != null ? d.instances : '?') + '\n';
+  tekst += 'Daarvan gematched: ' + (d.matched != null ? d.matched : '?') + '\n';
+  tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
+  tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
+  tekst += 'Lookup VIDs: ' + (d.lookupVids || 0) + ' | voorbeeld: ' + JSON.stringify(d.lookupVidSample || []) + '\n\n';
+  if (d.unmatched && d.unmatched.length) {
+    tekst += 'UNMATCHED PSET INSTANCES (eerste ' + d.unmatched.length + ')\n';
+    tekst += '-----------------------------------------\n';
+    tekst += JSON.stringify(d.unmatched, null, 2) + '\n\n';
+  }
+  tekst += 'VOORBEELD DOCS (eerste 3)\n';
+  tekst += '-------------------------\n';
+  tekst += JSON.stringify(sampleDocs, null, 2) + '\n\n';
+  tekst += 'EDITABLE_COLS: ' + (EDITABLE_COLS || []).join(', ') + '\n';
+  tekst += 'DEFAULT_VISIBLE: ' + (DEFAULT_VISIBLE || []).join(', ') + '\n';
+  tekst += 'colProfile: ' + (colProfile || '?') + '\n';
+  var kopieer = function() {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(tekst);
+    }
+    // Fallback voor oudere browsers / iframe-context
+    var ta = document.createElement('textarea');
+    ta.value = tekst; ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    return Promise.resolve();
+  };
+  kopieer().then(function() {
+    var origText = btn.innerHTML;
+    btn.innerHTML = '✓ Gekopieerd — plak in je mail';
+    btn.classList.add('ok');
+    setTimeout(function() { btn.innerHTML = origText; btn.classList.remove('ok'); }, 3000);
+  }).catch(function() {
+    alert('Kopiëren mislukt. Open F12 > Console en kopieer daar handmatig:\n\n' + tekst.slice(0, 500) + '...');
+  });
+}
+
 function buildEditableCols() {
   var psetVelden = [];
   for (var id in PROP_MAP) { var v = PROP_MAP[id]; if (psetVelden.indexOf(v) === -1) psetVelden.push(v); }
