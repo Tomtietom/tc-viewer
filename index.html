@@ -75,18 +75,6 @@ h1 em,h2 em,h3 em,h4 em,.accent{font-style:normal;color:var(--af)}
 .ucard h2{font-family:'Montserrat',sans-serif;font-size:22px;margin-bottom:4px}
 .ucard .tag{color:var(--af);font-size:13px;font-weight:500;margin-bottom:16px}
 .ucard p{color:#666;margin-bottom:20px;font-size:14px}
-.dz{border:2px dashed #ccc;border-radius:12px;padding:24px;margin-bottom:12px;transition:.2s;cursor:pointer}
-.dz:hover,.dz.over{border-color:var(--af);background:var(--afl)}
-.dz .ic{font-size:36px;margin-bottom:6px}
-.dz label{color:var(--af);cursor:pointer;font-weight:600}
-input[type=file]{display:none}
-.go-btn{padding:12px 36px;background:var(--af);color:#fff;border:none;border-radius:40px;font-size:15px;font-weight:600;font-family:'Montserrat',sans-serif;cursor:pointer;opacity:.4;transition:.2s;box-shadow:0 10px 25px rgba(212,130,26,.3);margin-top:14px}
-.go-btn:not(:disabled){opacity:1}
-.go-btn:not(:disabled):hover{background:var(--af2)}
-.up-group{text-align:left;margin:12px 0;padding:14px;background:#f8f9fa;border-radius:8px}
-.up-group h3{font-size:13px;font-weight:600;margin-bottom:4px}
-.up-group .st{font-size:12px;color:#666}
-.up-group .st.ok{color:var(--ok);font-weight:500}
 .disc{margin-top:var(--s5);padding:var(--s4);background:var(--afl);border-left:4px solid var(--af);border-radius:var(--r-sm);font-size:13px;color:#222;text-align:left;line-height:1.6}
 .disc b{color:var(--af);font-weight:700}
 
@@ -611,6 +599,12 @@ const PSET_REGIONS = { europe: PSET_PROXY + '/eu', 'north america': PSET_PROXY +
 let TC_BASE = TC_API_REGIONS.europe;
 let PSET_BASE = PSET_REGIONS.europe;
 
+// Korte regio-code (eu/us/ap) voor gebruik in proxy-URLs zoals PROXY_BASE + '/tc/' + getTcRegion() + ...
+function getTcRegion() {
+  return TC_BASE.indexOf('app21') >= 0 ? 'eu'
+       : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+}
+
 const VERPLICHT = ['document_status','discipline','project_fase','document_datum'];
 const VERPLICHT_LABEL = {'document_status':'Document status','discipline':'Discipline','project_fase':'Project fase','document_datum':'Document datum'};
 const STATUS_KLEUR = {'Definitief':'var(--ok)','Voor uitvoering':'var(--info)','Concept':'#888','Vervallen':'var(--warn)'};
@@ -716,7 +710,7 @@ function getCols() {
   }
   return cols;
 }
-// Oud COLS alias voor compatibiliteit tijdens migratie
+// Actieve kolommen (visible + in volgorde). Wordt ververst bij profile-switch, kolom toe/uitzetten, etc.
 var COLS = getCols();
 
 const TCM = {'File location':'file_location','Bestandsnaam':'bestandsnaam','Document nummer':'document_nummer','Project fase':'project_fase','Document datum':'document_datum','Revisie':'revisie','Document status':'document_status','Bedrijf':'bedrijf','Bouwdeel':'bouwdeel','Bouwnummer':'bouwnummer','Contract status':'contract_status','Controlestatus (door controlerende partij)':'controlestatus','Controleverzoek':'controleverzoek','Discipline':'discipline','Document aanmaak datum':'document_aanmaak_datum','Document soort':'document_soort','IFC timestamp':'ifc_timestamp','Tags':'tags','Titel':'titel'};
@@ -1253,7 +1247,6 @@ async function tcGetMetadata(projectId, bestanden) {
     var i18n = defResp.i18n || {};
 
     console.log('[TC] PSet definitie: schema.props=' + propIds.length + ' UUIDs, i18n keys=' + Object.keys(i18n).join(','));
-    if (Object.keys(i18n).length > 0) console.log('[TC] i18n data:', JSON.stringify(i18n).substring(0, 1000));
 
     // Methode A: i18n — property namen per locale
     // Probeer meerdere i18n formaten:
@@ -1464,7 +1457,6 @@ async function tcGetMetadata(projectId, bestanden) {
   }
 }
 
-// (Standalone upload verwijderd — alleen TC extensie modus)
 
 // === DASHBOARD ===
 function toonDashboard() { goTo('pgDash'); renderDash(); }
@@ -2436,7 +2428,7 @@ async function laadPreview(vid, naam, ext, imgExts) {
   var el = document.getElementById('dpPrev');
   if (!el) return;
   try {
-    var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+    var tcRegion = getTcRegion();
     var proxyUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + vid + '/downloadurl';
     var doPrev = function() {
       return fetchWithTimeout(proxyUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } });
@@ -2536,7 +2528,7 @@ function toonReleaseDetail(relId) {
 
 async function removeFromRelease(relId, fileId, fileName) {
   if (!confirm('Verwijder "' + fileName + '" uit deze release?')) return;
-  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  var tcRegion = getTcRegion();
   var url = PROXY_BASE + '/tc/' + tcRegion + '/releases/' + relId + '/files';
   var doReq = function() {
     return fetchWithTimeout(url, {
@@ -2589,7 +2581,7 @@ async function downloadRelease(relId) {
     var dlFileId = (doc && doc._vid) ? doc._vid : fileId;
     if (!dlFileId) { console.warn('[Release DL] Geen fileId voor:', f.name, f); failed++; continue; }
     try {
-      var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+      var tcRegion = getTcRegion();
       var dlUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + dlFileId + '/downloadurl';
       var doDl = function() { return fetchWithTimeout(dlUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } }); };
       await _ensureValidToken();
@@ -2689,7 +2681,7 @@ async function confirmDownloadZIP() {
     try {
       // Stap 1: haal signed download URL op via TC API
       // Bij niet-laatste versie: versionId query-param toevoegen
-      var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+      var tcRegion = getTcRegion();
       var zipDlUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + doc._vid + '/downloadurl';
       if (doc._selectedVersionId) zipDlUrl += '?versionId=' + encodeURIComponent(doc._selectedVersionId);
       var doZipDl = function() {
@@ -3280,7 +3272,7 @@ async function sendShare(method) {
   btn.textContent = '⏳ Verzenden...'; btn.disabled = true;
 
   try {
-    var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+    var tcRegion = getTcRegion();
     var shareUrl = PROXY_BASE + '/tc/' + tcRegion + '/shares';
     var doShare = function() {
       return fetchWithTimeout(shareUrl, {
@@ -3410,8 +3402,7 @@ var _releaseVersionCache = {};
 // { id (=fileId), versionId, revision, name, createdOn, createdBy{firstName,lastName,...}, ... }
 async function fetchFileVersions(vid) {
   if (_releaseVersionCache[vid]) return _releaseVersionCache[vid];
-  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu'
-               : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  var tcRegion = getTcRegion();
   var path = '/files/' + encodeURIComponent(vid) + '/versions?tokenThumburl=false';
   // Eerst direct TC proberen — sommige TC endpoints hebben CORS open.
   // Als dat faalt, via de Cloudflare-proxy.
@@ -3482,11 +3473,6 @@ function renderVersionFileList(listId, docsArray, ctx) {
   list.innerHTML = rows.join('');
 }
 
-// Compat-wrapper voor bestaande release-flow
-function renderReleaseFileList() {
-  renderVersionFileList('releaseFileList', _releaseDocs, 'rel');
-}
-
 function _creatorNaam(cb) {
   if (!cb) return '';
   if (typeof cb === 'string') return cb;
@@ -3544,15 +3530,12 @@ function pickVersion(ctx, idx, versionId, isLatest) {
   _rerenderCtx(ctx);
 }
 
-// Compat-wrappers voor release-flow
-function toggleReleaseVerPicker(idx) { return toggleVersionPicker('rel', idx); }
-function pickReleaseVersion(idx, versionId, isLatest) { return pickVersion('rel', idx, versionId, isLatest); }
 
 function openReleaseDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
   if (!selDocs.length) { alert('Selecteer eerst bestanden'); return; }
   _releaseDocs = selDocs.map(function(d) { return Object.assign({}, d, { _versions: null, _versionsLoading: true, _selectedVersionId: null }); });
-  renderReleaseFileList();
+  renderVersionFileList('releaseFileList', _releaseDocs, 'rel');
   // Vul dropdown met open releases
   var sel = document.getElementById('releaseSelect');
   sel.innerHTML = '<option value="">Kies een release...</option><option value="__new__">+ Nieuwe release aanmaken</option>';
@@ -3587,7 +3570,7 @@ async function loadReleaseVersions() {
       }
       d._versionsLoading = false;
     }));
-    renderReleaseFileList();
+    renderVersionFileList('releaseFileList', _releaseDocs, 'rel');
   }
 }
 
@@ -3607,7 +3590,7 @@ async function submitRelease() {
 
   var btn = document.getElementById('releaseSubmitBtn');
   btn.disabled = true; btn.textContent = '⏳ Bezig...';
-  var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+  var tcRegion = getTcRegion();
   var relId = selVal;
   var relName = '';
 
