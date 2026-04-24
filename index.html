@@ -236,20 +236,23 @@ td a:hover{color:var(--af);text-decoration:underline}
 .modal textarea{height:80px;resize:vertical}
 .modal .file-list{background:var(--g1);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:var(--fs-xs);color:var(--g5);max-height:180px;overflow-y:auto;margin-bottom:var(--s1)}
 /* Release-dialog per-bestand rij met versie-info/picker */
-.rf-row{display:flex;align-items:center;gap:var(--s2);padding:4px 0;border-bottom:1px solid var(--hl-light);position:relative}
+.rf-row{padding:var(--s2) 0;border-bottom:1px solid var(--hl-light)}
 .rf-row:last-child{border:none}
+.rf-row-hd{display:flex;align-items:center;gap:var(--s2)}
 .rf-row .rf-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--g6)}
 .rf-v-load{font-size:10px;color:var(--g3);font-style:italic}
 .rf-v-single{font-size:10px;color:var(--g3)}
 .rf-v-pill{font-size:10px;padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--hl);background:#fff;color:var(--g5);cursor:pointer;font-weight:500;user-select:none;white-space:nowrap}
 .rf-v-pill:hover{border-color:var(--af);color:var(--af)}
 .rf-v-pill.rf-v-custom{border-color:var(--af);background:var(--afl);color:var(--af);font-weight:600}
-.rf-v-picker{position:absolute;top:100%;right:0;z-index:10;background:#fff;border:1px solid var(--hl);border-radius:var(--r-sm);box-shadow:0 4px 12px rgba(0,0,0,.12);min-width:260px;max-height:240px;overflow-y:auto;margin-top:2px}
-.rf-v-opt{padding:6px 10px;font-size:11px;color:var(--g6);cursor:pointer;border-bottom:1px solid var(--hl-light)}
+.rf-v-picker{margin-top:var(--s2);margin-left:var(--s3);background:var(--g1);border:1px solid var(--hl-light);border-radius:var(--r-sm);max-height:200px;overflow-y:auto}
+.rf-v-opt{padding:8px 12px;font-size:var(--fs-sm);color:var(--g6);cursor:pointer;border-bottom:1px solid var(--hl-light);display:flex;flex-direction:column;gap:2px;transition:background .1s}
 .rf-v-opt:last-child{border:none}
-.rf-v-opt:hover{background:var(--afl);color:var(--af)}
-.rf-v-opt.sel{background:var(--af);color:#fff;font-weight:600}
-.rf-v-opt.sel:hover{background:var(--af2);color:#fff}
+.rf-v-opt:hover{background:var(--afl)}
+.rf-v-opt.sel{background:var(--af);color:#fff}
+.rf-v-opt.sel .rf-v-opt-meta{color:rgba(255,255,255,.85)}
+.rf-v-opt-main{font-weight:600;font-size:var(--fs-sm)}
+.rf-v-opt-meta{font-size:10px;color:var(--g4)}
 .modal .btn-row{display:flex;gap:var(--s2);margin-top:var(--s4)}
 .modal .btn-primary{flex:1;padding:10px;background:var(--af);color:#fff;border:none;border-radius:var(--r-sm);font-size:var(--fs-md);font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;transition:background .15s}
 .modal .btn-primary:hover{background:var(--af2)}
@@ -1966,7 +1969,11 @@ function filt() {
     if (z) { var parts = []; getCols().forEach(function(c) { parts.push(docVal(d, c.k)); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
     return true;
   });
-  if (sortK) d.sort(function(a,b) { var va=docVal(a,sortK).toLowerCase(), vb=docVal(b,sortK).toLowerCase(); return sortD==='asc'?va.localeCompare(vb,'nl'):vb.localeCompare(va,'nl'); });
+  if (sortK) d.sort(function(a,b) {
+    var va = String(docVal(a, sortK) == null ? '' : docVal(a, sortK)).toLowerCase();
+    var vb = String(docVal(b, sortK) == null ? '' : docVal(b, sortK)).toLowerCase();
+    return sortD === 'asc' ? va.localeCompare(vb, 'nl') : vb.localeCompare(va, 'nl');
+  });
   return d;
 }
 
@@ -3131,17 +3138,23 @@ function renderReleaseFileList() {
     var isLatest = !d._selectedVersionId || latestVersionId === selectedId;
     var hasMany = versions.length > 1;
     var versieInfo;
+    var pickerHtml = '';
     if (d._versionsLoading) {
       versieInfo = '<span class="rf-v-load">versies laden…</span>';
     } else if (!hasMany) {
       versieInfo = '<span class="rf-v-single">laatste versie</span>';
     } else {
       var selVer = versions.find(function(v) { return v.versionId === selectedId; }) || latest;
-      var label = (isLatest ? 'laatste' : 'v' + (selVer.revision || '?')) + ' van ' + versions.length;
-      versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleReleaseVerPicker(' + idx + ')">' + label + ' ▾</span>'
-        + '<div class="rf-v-picker" id="rfvp_' + idx + '" style="display:none"></div>';
+      var label = isLatest
+        ? 'Laatste (v' + (latest.revision || versions.length) + ' van ' + versions.length + ')'
+        : 'Versie ' + (selVer.revision || '?') + ' van ' + versions.length;
+      versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleReleaseVerPicker(' + idx + ')" title="Klik om andere versie te kiezen">' + label + ' ▾</span>';
+      pickerHtml = '<div class="rf-v-picker" id="rfvp_' + idx + '" style="display:none"></div>';
     }
-    return '<div class="rf-row"><span class="rf-name" title="' + d.bestandsnaam.replace(/"/g,'&quot;') + '">' + d.bestandsnaam + '</span>' + versieInfo + '</div>';
+    return '<div class="rf-row">'
+      + '<div class="rf-row-hd"><span class="rf-name" title="' + d.bestandsnaam.replace(/"/g,'&quot;') + '">' + d.bestandsnaam + '</span>' + versieInfo + '</div>'
+      + pickerHtml
+      + '</div>';
   });
   list.innerHTML = rows.join('');
 }
@@ -3160,6 +3173,8 @@ function toggleReleaseVerPicker(idx) {
   var d = _releaseDocs[idx];
   var el = document.getElementById('rfvp_' + idx);
   if (!el || !d || !d._versions) return;
+  // Eerst alle andere pickers sluiten (max 1 open tegelijk)
+  document.querySelectorAll('.rf-v-picker').forEach(function(p) { if (p !== el) p.style.display = 'none'; });
   if (el.style.display === 'block') { el.style.display = 'none'; return; }
   var latestVersionId = d._versions[0].versionId;
   el.innerHTML = d._versions.map(function(v, vi) {
@@ -3167,9 +3182,12 @@ function toggleReleaseVerPicker(idx) {
     var selected = (d._selectedVersionId || latestVersionId) === v.versionId;
     var dt = (v.createdOn || v.modifiedOn || '').substring(0, 10);
     var by = _creatorNaam(v.createdBy);
-    if (by) by = ' — ' + by;
-    var vlabel = 'v' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
-    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">' + vlabel + ' — ' + dt + by + '</div>';
+    var meta = dt + (by ? ' · ' + by : '');
+    var vlabel = 'Versie ' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
+    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">'
+      + '<span class="rf-v-opt-main">' + vlabel + '</span>'
+      + '<span class="rf-v-opt-meta">' + meta + '</span>'
+      + '</div>';
   }).join('');
   el.style.display = 'block';
 }
