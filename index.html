@@ -253,6 +253,16 @@ td a:hover{color:var(--af);text-decoration:underline}
 .rf-v-opt.sel .rf-v-opt-meta{color:rgba(255,255,255,.85)}
 .rf-v-opt-main{font-weight:600;font-size:var(--fs-sm)}
 .rf-v-opt-meta{font-size:10px;color:var(--g4)}
+
+/* Detail-paneel: versies-sectie */
+.dp-versions .dp-v{display:flex;align-items:center;gap:var(--s2);padding:6px 0;border-bottom:1px solid var(--hl-light)}
+.dp-versions .dp-v:last-child{border:none}
+.dp-versions .dp-v-info{flex:1;min-width:0}
+.dp-versions .dp-v-label{font-size:var(--fs-sm);font-weight:600;color:var(--g6)}
+.dp-versions .dp-v-latest .dp-v-label{color:var(--af)}
+.dp-versions .dp-v-meta{font-size:10px;color:var(--g4);margin-top:1px}
+.dp-versions .dp-v-link{color:var(--af);text-decoration:none;font-size:14px;padding:4px 8px;border-radius:var(--r-sm);transition:background .15s}
+.dp-versions .dp-v-link:hover{background:var(--afl)}
 .modal .btn-row{display:flex;gap:var(--s2);margin-top:var(--s4)}
 .modal .btn-primary{flex:1;padding:10px;background:var(--af);color:#fff;border:none;border-radius:var(--r-sm);font-size:var(--fs-md);font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;transition:background .15s}
 .modal .btn-primary:hover{background:var(--af2)}
@@ -546,6 +556,21 @@ td a:hover{color:var(--af);text-decoration:underline}
       </div>
       <div class="btn-row">
         <button class="btn-primary" onclick="closeReleaseDialog()">Sluiten</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DOWNLOAD MODAL -->
+<div class="modal-bg" id="downloadModal">
+  <div class="modal">
+    <div id="downloadForm">
+      <h3>&#128230; Download als ZIP</h3>
+      <div class="file-list" id="downloadFileList"></div>
+      <div style="font-size:11px;color:var(--g4);margin-top:var(--s2)">Bij bestanden met meerdere versies kun je kiezen welke versie je downloadt. Standaard wordt de laatste versie gepakt.</div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="closeDownloadDialog()">Annuleren</button>
+        <button class="btn-primary" id="downloadSubmitBtn" onclick="confirmDownloadZIP()">&#128230; Download ZIP</button>
       </div>
     </div>
   </div>
@@ -2138,6 +2163,8 @@ function toonDetail(doc) {
     }
     html += '</div></div>';
     html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
+    // Versies-sectie (alleen als meer dan 1 versie, async geladen)
+    html += '<div class="dp-sec dp-versions" id="dpVersionsSec" style="display:none"><h4>Versies</h4><div id="dpVersions"></div></div>';
   }
   document.getElementById('dpCnt').innerHTML = html;
   // Laad preview async (iframe/img kan geen Authorization header sturen)
@@ -2147,8 +2174,39 @@ function toonDetail(doc) {
     if (['pdf'].indexOf(ext2) >= 0 || EXT_IMG2.indexOf(ext2) >= 0) {
       laadPreview(doc._vid, doc.bestandsnaam, ext2, EXT_IMG2);
     }
+    // Laad versies async — toont alleen als er >1 zijn
+    laadDetailVersies(doc._vid);
   }
   renderT();
+}
+
+async function laadDetailVersies(vid) {
+  var sec = document.getElementById('dpVersionsSec');
+  var el = document.getElementById('dpVersions');
+  if (!sec || !el) return;
+  try {
+    var versions = await fetchFileVersions(vid);
+    if (!versions || versions.length <= 1) {
+      // Bestanden met 1 versie tonen we niet — minder visuele ruis
+      sec.style.display = 'none';
+      return;
+    }
+    el.innerHTML = versions.map(function(v, i) {
+      var isLatest = i === 0;
+      var dt = (v.createdOn || '').substring(0, 10);
+      var by = _creatorNaam(v.createdBy);
+      var meta = dt + (by ? ' · ' + by : '');
+      var label = 'Versie ' + (v.revision || (versions.length - i)) + (isLatest ? ' (laatste)' : '');
+      var tcUrl = 'https://web.connect.trimble.com/projects/' + pid + '/files/' + vid + '?versionId=' + v.versionId;
+      return '<div class="dp-v' + (isLatest ? ' dp-v-latest' : '') + '">'
+        + '<div class="dp-v-info"><div class="dp-v-label">' + label + '</div><div class="dp-v-meta">' + meta + '</div></div>'
+        + '<a class="dp-v-link" href="' + tcUrl + '" target="_blank" title="Open deze versie in Trimble Connect">&#8599;</a>'
+        + '</div>';
+    }).join('');
+    sec.style.display = '';
+  } catch (e) {
+    sec.style.display = 'none';
+  }
 }
 
 async function laadPreview(vid, naam, ext, imgExts) {
@@ -2368,12 +2426,29 @@ function shortPath(loc) {
   }).join('_');
 }
 
-async function downloadZIP() {
+function downloadZIP() {
+  // Open download-dialog met versie-picker per bestand (default = laatste)
   var allFiltered = filt();
   var filtered = selectedDocs.size > 0 ? allFiltered.filter(function(d) { return selectedDocs.has(d._vid); }) : allFiltered;
   if (!filtered.length) { alert('Geen documenten om te downloaden'); return; }
-  var label = selectedDocs.size > 0 ? filtered.length + ' geselecteerde bestanden' : filtered.length + ' bestanden';
-  if (!confirm('Download ' + label + ' als ZIP?\n\nDit kan even duren bij grote bestanden.')) return;
+  _downloadDocs = filtered.map(function(d) {
+    return Object.assign({}, d, { _versions: null, _versionsLoading: true, _selectedVersionId: null });
+  });
+  renderVersionFileList('downloadFileList', _downloadDocs, 'dl');
+  closeHdrMenu();
+  document.getElementById('downloadModal').classList.add('vis');
+  // Versies parallel laden zodat pickers verschijnen
+  loadVersionsForDocs(_downloadDocs, 'downloadFileList', 'dl');
+}
+
+function closeDownloadDialog() {
+  document.getElementById('downloadModal').classList.remove('vis');
+}
+
+async function confirmDownloadZIP() {
+  closeDownloadDialog();
+  var filtered = _downloadDocs;
+  if (!filtered.length) return;
 
   // Gebruik de menu-knop (⋯) tijdelijk als progress-indicator
   var zipBtn = document.getElementById('menuBtn');
@@ -2381,7 +2456,6 @@ async function downloadZIP() {
   zipBtn.textContent = '⏳ 0/' + filtered.length;
   zipBtn.disabled = true;
   zipBtn.style.minWidth = '80px';
-  closeHdrMenu();
 
   var zip = new JSZip();
   var downloaded = 0, failed = 0;
@@ -2391,8 +2465,10 @@ async function downloadZIP() {
     if (!doc._vid) { failed++; continue; }
     try {
       // Stap 1: haal signed download URL op via TC API
+      // Bij niet-laatste versie: versionId query-param toevoegen
       var tcRegion = TC_BASE.indexOf('app21') >= 0 ? 'eu' : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
       var zipDlUrl = PROXY_BASE + '/tc/' + tcRegion + '/files/fs/' + doc._vid + '/downloadurl';
+      if (doc._selectedVersionId) zipDlUrl += '?versionId=' + encodeURIComponent(doc._selectedVersionId);
       var doZipDl = function() {
         return fetchWithTimeout(zipDlUrl, { headers: { 'Authorization': 'Bearer ' + tcToken } });
       };
@@ -2889,11 +2965,11 @@ function openShareDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
   if (!selDocs.length) { alert('Selecteer eerst bestanden om te delen'); return; }
   _lastShareDocs = selDocs;
-  // Vul bestandslijst
-  var list = document.getElementById('shareFileList');
-  var namen = selDocs.map(function(d) { return d.bestandsnaam; });
-  if (namen.length <= 10) { list.textContent = namen.join('\n'); }
-  else { list.textContent = namen.slice(0, 10).join('\n') + '\n... en ' + (namen.length - 10) + ' meer'; }
+  // Versie-state per bestand (zelfde shape als release-flow)
+  _shareDocs = selDocs.map(function(d) {
+    return Object.assign({}, d, { _versions: null, _versionsLoading: true, _selectedVersionId: null });
+  });
+  renderVersionFileList('shareFileList', _shareDocs, 'sh');
   // Reset form
   document.getElementById('shareEmails').value = '';
   document.getElementById('shareMsg').value = '';
@@ -2905,6 +2981,8 @@ function openShareDialog() {
   document.getElementById('shareForm').style.display = '';
   document.getElementById('shareSuccess').style.display = 'none';
   document.getElementById('shareModal').classList.add('vis');
+  // Versies parallel ophalen
+  loadVersionsForDocs(_shareDocs, 'shareFileList', 'sh');
 }
 
 function updateShareModeInfo() {
@@ -2961,8 +3039,14 @@ async function sendShare(method) {
     projectId: pid,
     permission: perm,
     message: fullMsg,
-    objects: _lastShareDocs.map(function(d) { return { id: d._vid, type: 'FILE' }; })
+    objects: (_shareDocs.length ? _shareDocs : _lastShareDocs).map(function(d) {
+      var obj = { id: d._vid, type: 'FILE' };
+      if (d._selectedVersionId) obj.versionId = d._selectedVersionId;
+      return obj;
+    })
   };
+  var cnt = _shareDocs.filter(function(d) { return d._selectedVersionId; }).length;
+  if (cnt) console.log('[Share] ' + cnt + '/' + _shareDocs.length + ' bestanden met aangepaste versie');
   // PROJECT_USERS: notify met USER/GROUP, anders EMAIL
   if (method === 'tc' && emails.length) {
     body.notify = emails.map(function(e) { return { type: 'EMAIL', id: e }; });
@@ -3078,6 +3162,22 @@ function openShareInMail() {
 
 // === RELEASE BEHEER ===
 var _releaseDocs = [];
+var _shareDocs = [];
+var _downloadDocs = [];
+
+// Generieke parallel-loader voor versies. Gebruikt in release/share/download.
+async function loadVersionsForDocs(docsArray, listId, ctx) {
+  var BATCH = 10;
+  for (var b = 0; b < docsArray.length; b += BATCH) {
+    var batch = docsArray.slice(b, b + BATCH);
+    await Promise.all(batch.map(async function(d) {
+      try { d._versions = await fetchFileVersions(d._vid); }
+      catch (e) { d._versions = []; }
+      d._versionsLoading = false;
+    }));
+    renderVersionFileList(listId, docsArray, ctx);
+  }
+}
 // Per bestand: { vid: [{id, version, createdOn, createdBy}, ...] }
 var _releaseVersionCache = {};
 
@@ -3124,21 +3224,21 @@ async function fetchFileVersions(vid) {
   return [];
 }
 
-// Render de bestandenlijst in de release-dialog met versie-info.
-// - 1 versie: toont alleen "laatste (vX)" als info
-// - Meer versies: toont pill met huidige keuze (default = laatste) + klikbaar voor dropdown
-function renderReleaseFileList() {
-  var list = document.getElementById('releaseFileList');
+// Generieke file-list renderer met versie-picker.
+// listId: DOM element waar je rijen in wil renderen
+// docsArray: array van {bestandsnaam, _versions, _versionsLoading, _selectedVersionId, ...}
+// ctx: korte prefix om DOM-ids uniek te houden bij meerdere dialogs ('rel'/'sh'/'dl')
+function renderVersionFileList(listId, docsArray, ctx) {
+  var list = document.getElementById(listId);
   if (!list) return;
-  var rows = _releaseDocs.map(function(d, idx) {
+  var rows = docsArray.map(function(d, idx) {
     var versions = d._versions || [];
-    var latest = versions[0]; // TC API geeft nieuwste eerst
+    var latest = versions[0];
     var latestVersionId = latest && latest.versionId;
     var selectedId = d._selectedVersionId || latestVersionId || '';
     var isLatest = !d._selectedVersionId || latestVersionId === selectedId;
     var hasMany = versions.length > 1;
-    var versieInfo;
-    var pickerHtml = '';
+    var versieInfo, pickerHtml = '';
     if (d._versionsLoading) {
       versieInfo = '<span class="rf-v-load">versies laden…</span>';
     } else if (!hasMany) {
@@ -3148,8 +3248,8 @@ function renderReleaseFileList() {
       var label = isLatest
         ? 'Laatste (v' + (latest.revision || versions.length) + ' van ' + versions.length + ')'
         : 'Versie ' + (selVer.revision || '?') + ' van ' + versions.length;
-      versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleReleaseVerPicker(' + idx + ')" title="Klik om andere versie te kiezen">' + label + ' ▾</span>';
-      pickerHtml = '<div class="rf-v-picker" id="rfvp_' + idx + '" style="display:none"></div>';
+      versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleVersionPicker(\'' + ctx + '\',' + idx + ')" title="Klik om andere versie te kiezen">' + label + ' ▾</span>';
+      pickerHtml = '<div class="rf-v-picker" id="vp_' + ctx + '_' + idx + '" style="display:none"></div>';
     }
     return '<div class="rf-row">'
       + '<div class="rf-row-hd"><span class="rf-name" title="' + d.bestandsnaam.replace(/"/g,'&quot;') + '">' + d.bestandsnaam + '</span>' + versieInfo + '</div>'
@@ -3157,6 +3257,11 @@ function renderReleaseFileList() {
       + '</div>';
   });
   list.innerHTML = rows.join('');
+}
+
+// Compat-wrapper voor bestaande release-flow
+function renderReleaseFileList() {
+  renderVersionFileList('releaseFileList', _releaseDocs, 'rel');
 }
 
 function _creatorNaam(cb) {
@@ -3169,9 +3274,23 @@ function _creatorNaam(cb) {
   return cb.fullName || cb.email || '';
 }
 
-function toggleReleaseVerPicker(idx) {
-  var d = _releaseDocs[idx];
-  var el = document.getElementById('rfvp_' + idx);
+// Generieke picker toggler — ctx bepaalt welke docs-array en container
+function _getCtxDocs(ctx) {
+  if (ctx === 'rel') return _releaseDocs;
+  if (ctx === 'sh') return _shareDocs;
+  if (ctx === 'dl') return _downloadDocs;
+  return [];
+}
+function _rerenderCtx(ctx) {
+  if (ctx === 'rel') renderVersionFileList('releaseFileList', _releaseDocs, 'rel');
+  else if (ctx === 'sh') renderVersionFileList('shareFileList', _shareDocs, 'sh');
+  else if (ctx === 'dl') renderVersionFileList('downloadFileList', _downloadDocs, 'dl');
+}
+
+function toggleVersionPicker(ctx, idx) {
+  var arr = _getCtxDocs(ctx);
+  var d = arr[idx];
+  var el = document.getElementById('vp_' + ctx + '_' + idx);
   if (!el || !d || !d._versions) return;
   // Eerst alle andere pickers sluiten (max 1 open tegelijk)
   document.querySelectorAll('.rf-v-picker').forEach(function(p) { if (p !== el) p.style.display = 'none'; });
@@ -3184,7 +3303,7 @@ function toggleReleaseVerPicker(idx) {
     var by = _creatorNaam(v.createdBy);
     var meta = dt + (by ? ' · ' + by : '');
     var vlabel = 'Versie ' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
-    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickReleaseVersion(' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">'
+    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickVersion(\'' + ctx + '\',' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">'
       + '<span class="rf-v-opt-main">' + vlabel + '</span>'
       + '<span class="rf-v-opt-meta">' + meta + '</span>'
       + '</div>';
@@ -3192,14 +3311,19 @@ function toggleReleaseVerPicker(idx) {
   el.style.display = 'block';
 }
 
-function pickReleaseVersion(idx, versionId, isLatest) {
-  var d = _releaseDocs[idx];
+function pickVersion(ctx, idx, versionId, isLatest) {
+  var arr = _getCtxDocs(ctx);
+  var d = arr[idx];
   if (!d) return;
-  d._selectedVersionId = isLatest ? null : versionId; // null = laatste (default behaviour)
-  var el = document.getElementById('rfvp_' + idx);
+  d._selectedVersionId = isLatest ? null : versionId;
+  var el = document.getElementById('vp_' + ctx + '_' + idx);
   if (el) el.style.display = 'none';
-  renderReleaseFileList();
+  _rerenderCtx(ctx);
 }
+
+// Compat-wrappers voor release-flow
+function toggleReleaseVerPicker(idx) { return toggleVersionPicker('rel', idx); }
+function pickReleaseVersion(idx, versionId, isLatest) { return pickVersion('rel', idx, versionId, isLatest); }
 
 function openReleaseDialog() {
   var selDocs = docs.filter(function(d) { return selectedDocs.has(d._vid); });
