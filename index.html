@@ -591,6 +591,9 @@ let tcAPI=null, tcProject=null, tcToken='', isEmbedded=false;
 let editMode=false, selectedDocs=new Set();
 var releases=[], releaseMap={}; // releaseMap: { fileId: ['Release naam',...] }
 var PROP_MAP = {};
+// Mapping van mappad → folder-ID uit TC, gevuld tijdens tcGetItemsRecursive.
+// Gebruikt om in navigateNaarMap() de juiste TC folder-URL te kunnen bouwen.
+var folderIdByPath = {};
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
 const PROXY_BASE = 'https://tc-proxy.tom-da0.workers.dev';
@@ -1196,6 +1199,7 @@ async function tcGetItemsRecursive(folderId, pad, result) {
     var naam = item.name || 'Naamloos';
     var volledigPad = pad ? pad + '/' + naam : naam;
     if (item.type === 'FOLDER') {
+      folderIdByPath[volledigPad] = item.id;
       subFolders.push({ id: item.id, pad: volledigPad });
     } else {
       result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '', _versie: item.revision || item.version || '' });
@@ -1847,6 +1851,15 @@ function _mergeNewFilesIntoDocs(newFiles) {
   docs.forEach(function(d) { if (!d.file_location) d.file_location = '(root)'; if (!mapS[d.file_location]) mapS[d.file_location] = []; mapS[d.file_location].push(d); });
 }
 
+// Bouw een TC-URL voor een map op basis van het pad (gebruikt folderIdByPath).
+// Geeft null als de folder-ID niet bekend is (bv. doc zonder volledig pad).
+function folderUrlForPath(pathLoc) {
+  if (!pathLoc || !pid) return null;
+  var folderId = folderIdByPath[pathLoc];
+  if (!folderId) return null;
+  return 'https://web.connect.trimble.com/projects/' + pid + '/files/' + folderId;
+}
+
 // Navigeer naar een map vanuit het detail-paneel (klikbaar pad).
 // Zelfde gedrag als klikken op de map in de mappenboom.
 function navigateNaarMap(e, loc) {
@@ -2354,8 +2367,16 @@ function toonDetail(doc) {
   var pathEl = document.querySelector('#dpHd .dp-path');
   var pathLoc = doc.file_location || '';
   if (pathLoc && pathLoc !== '(root)') {
-    var escaped = pathLoc.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    pathEl.innerHTML = '<a href="#" class="dp-path-link" onclick="navigateNaarMap(event,' + JSON.stringify(pathLoc) + ')" title="Klik om naar deze map te navigeren">' + escaped + '</a>';
+    var folderUrl = folderUrlForPath(pathLoc);
+    var escaped = pathLoc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (folderUrl) {
+      pathEl.innerHTML = '<a class="dp-path-link" href="' + folderUrl + '" target="_blank" rel="noopener" title="Open deze map in Trimble Connect (nieuw tabblad)">' + escaped + ' &#8599;</a>';
+    } else {
+      // Geen folder-ID bekend: fallback op filter-in-extensie
+      pathEl.innerHTML = '<a class="dp-path-link" href="#" title="Klik om naar deze map te filteren">' + escaped + '</a>';
+      var link = pathEl.querySelector('a');
+      if (link) link.addEventListener('click', function(e) { navigateNaarMap(e, pathLoc); });
+    }
   } else {
     pathEl.textContent = pathLoc;
   }
