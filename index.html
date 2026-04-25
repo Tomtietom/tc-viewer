@@ -496,7 +496,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -1072,6 +1072,7 @@ function vulDocs(files) {
       controleverzoek: b.controleverzoek||'', _vid: b._vid||'', _versionId: b._versionId||b._vid||'', _versie: b._versie||'',
       _created: b._created||'', _modified: b._modified||'',
       _canEdit: b._canEdit !== false, _psetLink: b._psetLink||'frn:tcfile:'+(b._vid||''),
+      _matchedFromInstance: !!b._matchedFromInstance, _psetChecked: !!b._psetChecked,
     };
   });
   mapS = {};
@@ -1190,6 +1191,15 @@ async function tcAutoFetchData() {
     }
     // Waarschuwingsbanner als <90% van bestanden metadata heeft
     try { toonMetaWaarschuwingIndienNodig(metaDocs.length, docs.length); } catch(_) {}
+
+    // === ACHTERGROND: DEEP-SCAN voor bestanden zonder bulk-match ===
+    // Niet awaiten — UI is direct bruikbaar, metadata komt gaandeweg binnen
+    try {
+      var _libIdDeep = 'tcproject:prod:' + pid;
+      tcGetMetadataDeep(pid, _libIdDeep, docs).catch(function(e) {
+        console.warn('[TC] Deep-scan mislukt:', e && e.message);
+      });
+    } catch(e) { console.warn('[TC] Deep-scan kon niet starten:', e.message); }
 
     // === PROJECT STANDAARD KOLOMMEN LADEN VIA HUB ===
     try { await loadProjectColConfig(); } catch(e) { console.warn('[TC] Project kolom-config laden mislukt:', e.message); }
@@ -1617,6 +1627,227 @@ async function tcGetMetadata(projectId, bestanden) {
   _metaDiag.legacyInstances = legacyInstances;
 }
 
+// ====================================================================
+// DEEP-SCAN — per-bestand PSet ophalen voor bestanden zonder bulk-match
+// ====================================================================
+//
+// TC's bulk-endpoint /libs/{lib}/psets levert max 100 unieke instances per project.
+// Het per-bestand endpoint /v1/psets/{frn}/{lib}/{defId} heeft die limiet niet.
+// We draaien dit op de achtergrond zodat de extensie direct bruikbaar is met de
+// initiële 100, en metadata gaandeweg invult voor de rest.
+//
+// Cache: sessionStorage psetDeep:{projId}:{vid} → { props, ts, status }
+// TTL: 30 min. 404's worden óók gecached om retry-storms te voorkomen.
+
+var _deepScan = null; // { actief, totaal, gedaan, succes, leeg, fout, cacheHit, startTs }
+var _DEEP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuten
+var _DEEP_RERENDER_EVERY = 25; // re-render UI elke N voltooide calls
+var _DEEP_CONCURRENCY = 10;
+
+function _psetDeepCacheKey(projId, vid) {
+  return 'psetDeep:' + projId + ':' + vid;
+}
+function _psetDeepCacheGet(projId, vid) {
+  try {
+    var raw = sessionStorage.getItem(_psetDeepCacheKey(projId, vid));
+    if (!raw) return null;
+    var obj = JSON.parse(raw);
+    if (!obj || (Date.now() - obj.ts) > _DEEP_CACHE_TTL_MS) return null;
+    return obj;
+  } catch(_) { return null; }
+}
+function _psetDeepCacheSet(projId, vid, data) {
+  try {
+    if (data === null) {
+      sessionStorage.removeItem(_psetDeepCacheKey(projId, vid));
+    } else {
+      sessionStorage.setItem(_psetDeepCacheKey(projId, vid), JSON.stringify({
+        props: data.props || null,
+        status: data.status || 200,
+        ts: Date.now()
+      }));
+    }
+  } catch(_) { /* sessionStorage vol of geblokkeerd — niet fataal */ }
+}
+
+// Pas één PSet-instance toe op een bestand: schrijf veldwaarden via PROP_MAP
+function _applyPSetPropsToBestand(b, props, link) {
+  if (!props) return;
+  b._matchedFromInstance = true;
+  if (link) b._psetLink = link;
+  for (var propId in props) {
+    var veldNaam = PROP_MAP[propId];
+    if (veldNaam && props[propId] !== undefined && props[propId] !== null && props[propId] !== '--') {
+      b[veldNaam] = String(props[propId]).trim();
+    }
+  }
+}
+
+// UI-update voor de scan-indicator rechts onderin
+function updateDeepScanUI() {
+  var ind = document.getElementById('deepScanIndicator');
+  if (!ind) return;
+  if (!_deepScan || !_deepScan.actief) {
+    ind.style.display = 'none';
+    return;
+  }
+  var done = _deepScan.gedaan, totaal = _deepScan.totaal;
+  var pct = totaal > 0 ? Math.round(done / totaal * 100) : 0;
+  ind.style.display = 'inline-flex';
+  ind.textContent = 'Metadata-scan: ' + done + '/' + totaal + ' (' + pct + '%)';
+}
+
+async function tcGetMetadataDeep(projectId, libId, bestanden) {
+  // Filter: alleen bestanden zonder PSet-match én niet al via cache afgehandeld
+  var todo = [];
+  var cacheHits = 0;
+  for (var i = 0; i < bestanden.length; i++) {
+    var b = bestanden[i];
+    if (b._matchedFromInstance) continue; // bulk-call had 'm al
+    var vid = b._versionId || b._vid;
+    if (!vid) continue;
+    var cached = _psetDeepCacheGet(projectId, vid);
+    if (cached) {
+      cacheHits++;
+      if (cached.status === 200 && cached.props) {
+        _applyPSetPropsToBestand(b, cached.props, 'frn:tcfile:' + vid);
+      } else {
+        b._psetChecked = true;
+      }
+      continue;
+    }
+    todo.push(b);
+  }
+
+  if (todo.length === 0 && cacheHits === 0) {
+    console.log('[TC] Deep-scan: niets te doen (alle bestanden via bulk gematcht)');
+    return;
+  }
+  console.log('[TC] Deep-scan start: ' + todo.length + ' bestanden, ' + cacheHits + ' cache-hits');
+
+  _deepScan = {
+    actief: todo.length > 0,
+    totaal: todo.length,
+    gedaan: 0,
+    succes: 0,
+    leeg: 0,
+    fout: 0,
+    cacheHit: cacheHits,
+    startTs: Date.now()
+  };
+  updateDeepScanUI();
+  // Banner kan al aangeven dat scan loopt
+  try { toonMetaWaarschuwingIndienNodig(
+    bestanden.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; }).length,
+    bestanden.length
+  ); } catch(_) {}
+
+  // Re-render zodra cache hits al data hebben opgeleverd
+  if (cacheHits > 0) {
+    try { renderT(); } catch(_) {}
+  }
+
+  if (todo.length === 0) {
+    _deepScan.actief = false;
+    updateDeepScanUI();
+    return;
+  }
+
+  // Pool van N parallel — eenvoudige worker-loop
+  var idx = 0;
+  var sinceLastRender = 0;
+  async function worker() {
+    while (idx < todo.length) {
+      var myIdx = idx++;
+      var b = todo[myIdx];
+      var vid = b._versionId || b._vid;
+      var link = 'frn:tcfile:' + vid;
+      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles';
+      try {
+        var resp = await tcFetchPSet(path, { rawResponse: true });
+        if (resp.status === 200) {
+          var txt = await resp.text();
+          var inst = txt ? JSON.parse(txt) : null;
+          if (inst && inst.props) {
+            _applyPSetPropsToBestand(b, inst.props, inst.link || link);
+            _psetDeepCacheSet(projectId, vid, { props: inst.props, status: 200 });
+            _deepScan.succes++;
+            // canEdit afleiden uit _actions zoals bulk-loop
+            if (Array.isArray(inst._actions) && inst._actions.indexOf('pset:PutPSet') >= 0) b._canEdit = true;
+          } else {
+            b._psetChecked = true;
+            _psetDeepCacheSet(projectId, vid, { props: null, status: 204 });
+            _deepScan.leeg++;
+          }
+        } else if (resp.status === 404) {
+          // Bestand heeft écht geen PSet — markeer en cache zodat we niet retryen
+          b._psetChecked = true;
+          _psetDeepCacheSet(projectId, vid, { props: null, status: 404 });
+          _deepScan.leeg++;
+        } else {
+          _deepScan.fout++;
+        }
+      } catch(e) {
+        _deepScan.fout++;
+        // Niet cachen — bij volgende sessie mag-ie 't opnieuw proberen
+      }
+      _deepScan.gedaan++;
+      sinceLastRender++;
+      // Periodieke UI-update
+      if (sinceLastRender >= _DEEP_RERENDER_EVERY) {
+        sinceLastRender = 0;
+        try { renderT(); } catch(_) {}
+        updateDeepScanUI();
+        try { toonMetaWaarschuwingIndienNodig(
+          bestanden.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; }).length,
+          bestanden.length
+        ); } catch(_) {}
+      } else {
+        updateDeepScanUI();
+      }
+    }
+  }
+
+  var workers = [];
+  var n = Math.min(_DEEP_CONCURRENCY, todo.length);
+  for (var w = 0; w < n; w++) workers.push(worker());
+  await Promise.all(workers);
+
+  _deepScan.actief = false;
+  var duurSec = Math.round((Date.now() - _deepScan.startTs) / 1000);
+  console.log('[TC] Deep-scan klaar in ' + duurSec + 's: ' + _deepScan.succes + ' nieuwe metadata, ' + _deepScan.leeg + ' leeg, ' + _deepScan.fout + ' fout, ' + _deepScan.cacheHit + ' cache-hits');
+
+  // Diagnose-snapshot bijwerken
+  if (_metaDiag) {
+    _metaDiag.deepScan = {
+      gecheckt: _deepScan.totaal,
+      succes: _deepScan.succes,
+      leeg: _deepScan.leeg,
+      fout: _deepScan.fout,
+      cacheHits: _deepScan.cacheHit,
+      duurSec: duurSec
+    };
+  }
+
+  // Eind-render + banner-update
+  try { renderT(); } catch(_) {}
+  try { toonMetaWaarschuwingIndienNodig(
+    bestanden.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; }).length,
+    bestanden.length
+  ); } catch(_) {}
+  updateDeepScanUI();
+
+  // Klein moment '✓ klaar', dan verbergen
+  var ind = document.getElementById('deepScanIndicator');
+  if (ind && _deepScan.fout < (_deepScan.totaal * 0.05)) {
+    ind.style.display = 'inline-flex';
+    ind.textContent = '✓ Metadata compleet';
+    setTimeout(function() {
+      if (ind) ind.style.display = 'none';
+    }, 4000);
+  }
+}
+
 // Toon een banner met een eerlijke samenvatting van wat aan metadata is gevonden.
 // Onderscheid:
 //   - Bestanden zonder PSet-instance: terecht leeg (gebruiker heeft niets ingevuld) → geen alarm
@@ -1629,13 +1860,18 @@ function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
   var pct = metMeta / totaal;
   var pctTxt = Math.round(pct * 100);
   var legacy = (_metaDiag && _metaDiag.legacyInstances) || 0;
-  var delen = [];
-  // Banner alleen tonen als er een legitieme reden is om iets te zeggen
-  // - Heel weinig dekking (>10% mist en >5 ontbrekend): laat user weten dat dit is wat we vinden
-  // - Of er zijn legacy instances: technisch detail dat we eerlijk willen vertellen
   var ontbreekt = totaal - metMeta;
+  var scanActief = !!(_deepScan && _deepScan.actief);
   var dekkingLaag = pct < 0.9 && ontbreekt > 5;
+  // Tijdens de achtergrond-scan: melden dat we nog bezig zijn
+  if (scanActief) {
+    tekst.textContent = 'Metadata wordt op de achtergrond opgehaald — ' + (_deepScan.gedaan || 0) + '/' + (_deepScan.totaal || 0) + ' bestanden klaar. Je kan ondertussen gewoon doorwerken.';
+    banner.style.display = 'flex';
+    return;
+  }
+  // Na scan: alleen tonen als er nog echt iets ontbreekt of legacy is gevonden
   if (!dekkingLaag && legacy === 0) { banner.style.display = 'none'; return; }
+  var delen = [];
   if (dekkingLaag) {
     delen.push(metMeta + ' van ' + totaal + ' bestanden hebben metadata (' + pctTxt + '%). De overige ' + ontbreekt + ' bestanden hebben in Trimble Connect (nog) geen metadata ingevuld.');
   }
@@ -2985,7 +3221,18 @@ function kopieerDiagnose(btn) {
   if (d.useItemsV21 != null) tekst += 'TC items endpoint: ' + (d.useItemsV21 ? 'v2.1 (met versionId)' : 'v2.0 (fallback, zonder versionId)') + '\n';
   tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
   tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
-  tekst += 'Lookup VIDs: ' + (d.lookupVids || 0) + ' | voorbeeld: ' + JSON.stringify(d.lookupVidSample || []) + '\n\n';
+  tekst += 'Lookup VIDs: ' + (d.lookupVids || 0) + ' | voorbeeld: ' + JSON.stringify(d.lookupVidSample || []) + '\n';
+  if (d.deepScan) {
+    tekst += 'Deep-scan: ' + d.deepScan.gecheckt + ' bestanden gecheckt via per-bestand endpoint';
+    tekst += ' | ' + d.deepScan.succes + ' kreeg metadata';
+    tekst += ', ' + d.deepScan.leeg + ' leeg/404';
+    tekst += ', ' + d.deepScan.fout + ' fout';
+    tekst += ', ' + d.deepScan.cacheHits + ' cache-hits';
+    tekst += ' (duur: ' + d.deepScan.duurSec + 's)\n';
+  } else if (_deepScan && _deepScan.actief) {
+    tekst += 'Deep-scan: nog bezig — ' + _deepScan.gedaan + '/' + _deepScan.totaal + ' klaar\n';
+  }
+  tekst += '\n';
   if (d.unmatched && d.unmatched.length) {
     tekst += 'UNMATCHED PSET INSTANCES (eerste ' + d.unmatched.length + ')\n';
     tekst += '-----------------------------------------\n';
@@ -3332,6 +3579,7 @@ async function bulkSave() {
           console.warn('[TC] Item geweigerd:', doc.bestandsnaam, item.error || item.errorMessage);
         } else {
           doc[field] = value;
+          try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
           saved++;
         }
       });
@@ -3340,7 +3588,10 @@ async function bulkSave() {
       throw new Error('TC weigerde ' + respJson.errorCount + ' van ' + (respJson.itemCount || changeItems.length) + ' items');
     } else {
       // Geen detail per item, neem aan dat alles oké is (HTTP 200/201)
-      toSave.forEach(function(doc) { doc[field] = value; });
+      toSave.forEach(function(doc) {
+        doc[field] = value;
+        try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
+      });
       saved = toSave.length;
     }
     // Nieuwe waarde incrementeel toevoegen aan datalist
@@ -3403,6 +3654,8 @@ async function saveCell(doc, field, value, el) {
     }
     // Pas NA succesvolle bevestiging de lokale state aanpassen
     doc[field] = value;
+    // Cache invalideren — opnieuw ophalen zorgt dat we niet vastzitten op stale waarden
+    try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
     // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
     try { addDatalistValue(field, value); } catch(_) {}
