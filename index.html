@@ -1604,102 +1604,45 @@ async function tcGetMetadata(projectId, bestanden) {
   _metaDiag.matchedByName = matchedByName;
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
 
-  // === Fallback voor onmatched bestanden: alle versies per bestand ophalen ===
-  // Alleen voor bestanden waar GEEN ENKELE PSet-instance aan gekoppeld kon worden.
-  // Bestanden die wel matchen maar lege props hebben, hebben gewoon geen metadata
-  // ingevuld in TC — die hoeven niet opnieuw bevraagd te worden.
-  // Daarnaast moet er ook iets te halen zijn: niet-gematchte unique unmatched links.
-  var uniqueUnmatchedLinks = Object.keys(seenLinks).length - matched; // proxy voor "ergens aanwezig maar niet gekoppeld"
-  var docsZonderMatch = bestanden.filter(function(b) { return b._vid && !b._matchedFromInstance; });
-  if (docsZonderMatch.length > 0 && uniqueUnmatchedLinks > 0) {
-    console.log('[TC] ' + docsZonderMatch.length + ' bestanden zonder PSet-match en ' + uniqueUnmatchedLinks + ' onmatched instances. Versies-fallback ophalen...');
-    try {
-      tcStep(4, 'loading', 'Versies controleren voor ' + docsZonderMatch.length + ' bestanden...');
-      // Bouw mapping versionId → doc voor ALLE versies van docs zonder metadata
-      var versieMap = {};
-      var enrichOk = 0, enrichFout = 0, enrichFoutVoorbeelden = [];
-      var BATCH = 10;
-      for (var b = 0; b < docsZonderMatch.length; b += BATCH) {
-        var batch = docsZonderMatch.slice(b, b + BATCH);
-        await Promise.all(batch.map(async function(d) {
-          try {
-            var versies = await tcFetch('/files/' + encodeURIComponent(d._vid) + '/versions?tokenThumburl=false');
-            var arr = Array.isArray(versies) ? versies : (versies && versies.items) || [];
-            if (arr.length) {
-              arr.forEach(function(v) {
-                if (v.versionId) versieMap[v.versionId] = d;
-                if (v.id) versieMap[v.id] = d; // soms is id ook een versionId-equivalent
-              });
-              enrichOk++;
-            } else {
-              enrichFout++;
-              if (enrichFoutVoorbeelden.length < 3) enrichFoutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: 'lege response'});
-            }
-          } catch (e) {
-            enrichFout++;
-            if (enrichFoutVoorbeelden.length < 3) enrichFoutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: e.message});
-          }
-        }));
-        var statusEl = document.getElementById('tcStatusText');
-        if (statusEl) statusEl.textContent = 'Versies: ' + Math.min(b + BATCH, docsZonderMatch.length) + '/' + docsZonderMatch.length;
-      }
-      console.log('[TC] Versies-fallback: ' + enrichOk + ' bestanden, ' + Object.keys(versieMap).length + ' versionIds in mapping (' + enrichFout + ' fouten)');
-      // Tweede match-pass tegen instArray (gededupliceerd)
-      var seenLinks2 = {};
-      var extra = 0;
-      for (var k = 0; k < instArray.length; k++) {
-        var inst2 = instArray[k];
-        var link2 = inst2.link || '';
-        if (!link2 || seenLinks2[link2]) continue;
-        seenLinks2[link2] = true;
-        if (!/^frn:tcfile:/.test(link2)) continue;
-        var vid2 = link2.replace(/^frn:tcfile:/, '').split('@')[0];
-        var b2 = versieMap[vid2];
-        if (!b2) continue;
-        // Skip als dit bestand inmiddels al een instance heeft (eerste pass of vorige iteratie)
-        if (b2._matchedFromInstance) continue;
-        b2._matchedFromInstance = true;
-        b2._canEdit = (inst2._actions || []).indexOf('pset:PutPSet') >= 0;
-        b2._psetLink = link2;
-        var props2 = inst2.props || {};
-        for (var pid2 in props2) {
-          var fn2 = PROP_MAP[pid2];
-          if (fn2 && props2[pid2] && props2[pid2] !== '--') {
-            b2[fn2] = String(props2[pid2]).trim();
-          }
-        }
-        extra++;
-      }
-      _metaDiag.matchedByVersion = (_metaDiag.matchedByVersion || 0) + extra;
-      _metaDiag.matched = (_metaDiag.matched || 0) + extra;
-      _metaDiag.enrichOk = enrichOk;
-      _metaDiag.enrichFout = enrichFout;
-      _metaDiag.enrichFoutVoorbeelden = enrichFoutVoorbeelden;
-      console.log('[TC] Versies-fallback: ' + extra + ' extra bestanden gekoppeld');
-    } catch (e) {
-      console.warn('[TC] Versies-fallback mislukt:', e.message);
-    }
-  }
+  // Compacte samenvatting: hoeveel bestanden hebben metadata, hoeveel zijn legacy
+  var pctMetMeta = bestanden.length > 0 ? Math.round(matched / bestanden.length * 100) : 0;
+  var legacyInstances = (instArray.length - matched);
+  console.log('[TC] ' + matched + '/' + bestanden.length + ' bestanden hebben PSet-metadata (' + pctMetMeta + '%); ' + legacyInstances + ' instances konden niet aan een huidig bestand gekoppeld worden');
 
   if (unmatchedSamples.length > 0) {
-    console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ')');
+    console.warn('[TC] ' + legacyInstances + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ') — mogelijk legacy data');
     console.warn('[TC] Unmatched voorbeelden:', JSON.stringify(unmatchedSamples, null, 2));
-    console.warn('[TC] Lookup heeft', Object.keys(lookup).length, 'file-vids. Voorbeeld VID:', Object.keys(lookup)[0]);
   }
+  // Bewaar voor banner/diagnose
+  _metaDiag.legacyInstances = legacyInstances;
 }
 
-// Toon een waarschuwing-banner als minder dan 90% van de bestanden metadata heeft.
-// Geeft user een direct signaal dat hij niet alle data ziet, met diagnose-knop.
+// Toon een banner met een eerlijke samenvatting van wat aan metadata is gevonden.
+// Onderscheid:
+//   - Bestanden zonder PSet-instance: terecht leeg (gebruiker heeft niets ingevuld) → geen alarm
+//   - Onmatched PSet-instances: legacy data (verwijderde bestanden o.i.d.) → wel melden
 function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
   var banner = document.getElementById('metaWarnBanner');
   var tekst = document.getElementById('metaWarnText');
   if (!banner || !tekst) return;
   if (totaal === 0) { banner.style.display = 'none'; return; }
   var pct = metMeta / totaal;
-  if (pct >= 0.9) { banner.style.display = 'none'; return; }
-  var ontbreekt = totaal - metMeta;
   var pctTxt = Math.round(pct * 100);
-  tekst.textContent = 'Mogelijk niet alle metadata zichtbaar — slechts ' + metMeta + ' van ' + totaal + ' bestanden hebben zichtbare metadata (' + pctTxt + '%). ' + ontbreekt + ' ontbreken.';
+  var legacy = (_metaDiag && _metaDiag.legacyInstances) || 0;
+  var delen = [];
+  // Banner alleen tonen als er een legitieme reden is om iets te zeggen
+  // - Heel weinig dekking (>10% mist en >5 ontbrekend): laat user weten dat dit is wat we vinden
+  // - Of er zijn legacy instances: technisch detail dat we eerlijk willen vertellen
+  var ontbreekt = totaal - metMeta;
+  var dekkingLaag = pct < 0.9 && ontbreekt > 5;
+  if (!dekkingLaag && legacy === 0) { banner.style.display = 'none'; return; }
+  if (dekkingLaag) {
+    delen.push(metMeta + ' van ' + totaal + ' bestanden hebben metadata (' + pctTxt + '%). De overige ' + ontbreekt + ' bestanden hebben in Trimble Connect (nog) geen metadata ingevuld.');
+  }
+  if (legacy > 0) {
+    delen.push(legacy + ' PSet-instance' + (legacy === 1 ? '' : 's') + ' uit het project konden niet aan een huidig bestand gekoppeld worden — waarschijnlijk legacy data van verwijderde bestanden.');
+  }
+  tekst.textContent = delen.join(' ');
   banner.style.display = 'flex';
 }
 
@@ -3035,12 +2978,7 @@ function kopieerDiagnose(btn) {
   if (d.matchedByVid != null || d.matchedByVersion != null || d.matchedByName != null) {
     tekst += '  via fileId: ' + (d.matchedByVid || 0) + ', via versionId: ' + (d.matchedByVersion || 0) + ', via naam: ' + (d.matchedByName || 0) + '\n';
   }
-  if (d.enrichOk != null || d.enrichFout != null) {
-    tekst += 'Versie-enrichment (tweede pass): ' + (d.enrichOk || 0) + ' succesvol, ' + (d.enrichFout || 0) + ' mislukt\n';
-    if (d.enrichFoutVoorbeelden && d.enrichFoutVoorbeelden.length) {
-      tekst += '  fout-voorbeelden: ' + JSON.stringify(d.enrichFoutVoorbeelden) + '\n';
-    }
-  }
+  if (d.legacyInstances != null) tekst += 'Legacy/onmatched PSet instances: ' + d.legacyInstances + '\n';
   if (d.dupInstances != null) tekst += 'PSet duplicaat-instances overgeslagen (na paginatie): ' + d.dupInstances + '\n';
   if (d.psetPaginatieMethode != null) tekst += 'PSet paginatie-methode: ' + d.psetPaginatieMethode + '\n';
   if (d.psetRawDuplicaten != null) tekst += 'PSet duplicaten in raw responses: ' + d.psetRawDuplicaten + '\n';
