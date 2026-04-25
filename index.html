@@ -1468,10 +1468,81 @@ async function tcGetMetadata(projectId, bestanden) {
   _metaDiag.matchedByVersion = matchedByVersion;
   _metaDiag.matchedByName = matchedByName;
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
+
+  // === Tweede pass: enrich versionId voor docs zonder metadata ===
+  // PSet-links hangen vaak aan versionId, maar /folders/X/items geeft die niet terug.
+  // Als veel bestanden ongematched blijven, halen we per bestand /files/{fileId} op
+  // om de actuele versionId te krijgen — daarna match-loop opnieuw.
+  var docsZonderMeta = bestanden.filter(function(b) {
+    if (!b._vid) return false;
+    return !b.document_status && !b.discipline && !b.project_fase
+        && !b.bedrijf && !b.titel && !b.bouwdeel && !b.document_nummer
+        && !b.revisie && !b.document_datum;
+  });
+  var pctZonder = bestanden.length > 0 ? docsZonderMeta.length / bestanden.length : 0;
+  if (docsZonderMeta.length > 5 && pctZonder > 0.3 && instArray.length > 0) {
+    console.log('[TC] ' + docsZonderMeta.length + ' bestanden zonder metadata. Tweede pass: actuele versionIds ophalen...');
+    try {
+      tcStep(4, 'loading', 'Versie-info verrijken voor ' + docsZonderMeta.length + ' bestanden...');
+      await enrichVersionIds(docsZonderMeta);
+      // Rebuild versionLookup met de verse versionIds
+      var versionLookup2 = {};
+      bestanden.forEach(function(b) {
+        if (b._versionId) versionLookup2[b._versionId] = b;
+      });
+      // Tweede match-pass tegen reeds opgehaalde instArray
+      var extra = 0;
+      for (var k = 0; k < instArray.length; k++) {
+        var inst2 = instArray[k];
+        var link2 = inst2.link || '';
+        if (!/^frn:tcfile:/.test(link2)) continue;
+        var vid2 = link2.replace(/^frn:tcfile:/, '').split('@')[0];
+        var b2 = versionLookup2[vid2];
+        if (!b2) continue;
+        // Skip als dit bestand inmiddels al metadata heeft
+        if (b2.document_status || b2.discipline || b2.titel || b2.bedrijf) continue;
+        b2._canEdit = (inst2._actions || []).indexOf('pset:PutPSet') >= 0;
+        b2._psetLink = link2;
+        var props2 = inst2.props || {};
+        for (var pid2 in props2) {
+          var fn2 = PROP_MAP[pid2];
+          if (fn2 && props2[pid2] && props2[pid2] !== '--') {
+            b2[fn2] = String(props2[pid2]).trim();
+          }
+        }
+        extra++;
+      }
+      _metaDiag.matchedByVersion = (_metaDiag.matchedByVersion || 0) + extra;
+      _metaDiag.matched = (_metaDiag.matched || 0) + extra;
+      console.log('[TC] Tweede pass: ' + extra + ' extra bestanden gekoppeld via versionId');
+    } catch (e) {
+      console.warn('[TC] Tweede pass mislukt:', e.message);
+    }
+  }
+
   if (unmatchedSamples.length > 0) {
     console.warn('[TC] ' + (instArray.length - matched) + ' unmatched PSet instances (niet-file links: ' + nonFileLinks + ')');
     console.warn('[TC] Unmatched voorbeelden:', JSON.stringify(unmatchedSamples, null, 2));
     console.warn('[TC] Lookup heeft', Object.keys(lookup).length, 'file-vids. Voorbeeld VID:', Object.keys(lookup)[0]);
+  }
+}
+
+// Vraag /files/{fileId} per bestand op om de actuele versionId te achterhalen.
+// Werkt parallel in batches van 10 om TC niet te overspoelen.
+async function enrichVersionIds(docsArr) {
+  var BATCH = 10;
+  var done = 0;
+  for (var b = 0; b < docsArr.length; b += BATCH) {
+    var batch = docsArr.slice(b, b + BATCH);
+    await Promise.all(batch.map(async function(d) {
+      try {
+        var info = await tcFetch('/files/' + encodeURIComponent(d._vid));
+        if (info && info.versionId) d._versionId = info.versionId;
+      } catch (e) { /* slaat over, laat huidige versionId staan */ }
+    }));
+    done += batch.length;
+    var statusEl = document.getElementById('tcStatusText');
+    if (statusEl) statusEl.textContent = 'Versie-info: ' + done + '/' + docsArr.length;
   }
 }
 
