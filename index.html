@@ -606,6 +606,7 @@ let tcAPI=null, tcProject=null, tcToken='', isEmbedded=false;
 let editMode=false, selectedDocs=new Set();
 var releases=[], releaseMap={}; // releaseMap: { fileId: ['Release naam',...] }
 var PROP_MAP = {};
+var _hasMetaSchema = true; // wordt na tcGetMetadata() gezet op basis van PROP_MAP-grootte
 // Mapping van mappad → folder-ID uit TC, gevuld tijdens tcGetItemsRecursive.
 // Gebruikt om in navigateNaarMap() de juiste TC folder-URL te kunnen bouwen.
 var folderIdByPath = {};
@@ -1233,6 +1234,9 @@ async function tcAutoFetchData() {
     // Waarschuwingsbanner als <90% van bestanden metadata heeft
     try { toonMetaWaarschuwingIndienNodig(metaDocs.length, docs.length); } catch(_) {}
 
+    // === UI aanpassen aan project-schema (filter/edit verbergen bij projecten zonder metadata) ===
+    try { applyMetaSchemaUI(); } catch(e) { console.warn('[TC] applyMetaSchemaUI mislukt:', e.message); }
+
     // === ACHTERGROND: DEEP-SCAN voor bestanden zonder bulk-match ===
     // Niet awaiten — UI is direct bruikbaar, metadata komt gaandeweg binnen
     try {
@@ -1498,11 +1502,13 @@ async function tcGetMetadata(projectId, bestanden) {
     console.log('[TC] PSet instances opgehaald: ' + instArray.length + ' uniek in ' + pages + ' pages (methode: ' + psetPaginatieMethode + ', ' + psetRawDuplicaten + ' duplicaten in respons)');
   } catch(e) {
     console.warn('[TC] PSet ophalen mislukt:', e.message);
-    return;
+    // Niet returnen — laat de rest van de functie lopen zodat _metaDiag wordt
+    // gevuld en de UI weet dat dit project geen metadata-schema heeft.
   }
 
-  // Fallback: hardcoded UUIDs (VW BVGO schema)
-  if (Object.keys(PROP_MAP).length === 0) {
+  // Fallback: hardcoded UUIDs (VW BVGO schema) — ALLEEN als we wél een schema-respons kregen
+  // maar de mapping leeg bleef. NIET bij 404 op de defs-call (dan heeft het project echt geen schema).
+  if (Object.keys(PROP_MAP).length === 0 && defResp) {
     console.log('[TC] Gebruik fallback PROP_MAP (hardcoded)');
     PROP_MAP = {
       '79715f10-055a-11ea-9ee0-4f66993176e1': 'document_datum',
@@ -1666,6 +1672,51 @@ async function tcGetMetadata(projectId, bestanden) {
   }
   // Bewaar voor banner/diagnose
   _metaDiag.legacyInstances = legacyInstances;
+  // Markeer of dit project überhaupt een metadata-schema heeft
+  _hasMetaSchema = Object.keys(PROP_MAP).length > 0;
+  _metaDiag.hasMetaSchema = _hasMetaSchema;
+  if (!_hasMetaSchema) {
+    console.log('[TC] Project heeft geen metadata-schema (geen PSet-definitie). Filter/edit-functies worden verborgen.');
+  }
+}
+
+// Schakel filter/bulk-edit/metadata-kolommen uit als het project geen PSet-schema heeft.
+// Wat blijft werken: bestandsnaam, datum, mappen, bestandstype-chips, delen, releases, ZIP.
+function applyMetaSchemaUI() {
+  var hasSchema = !!_hasMetaSchema;
+
+  // Filters-sectie (per-veld dropdowns) — alleen zin bij schema
+  var filtersSec = document.getElementById('filtersSec');
+  if (filtersSec) filtersSec.style.display = hasSchema ? '' : 'none';
+
+  // Bewerken-knop — verberg als geen schema (ook als al door goTo zichtbaar gezet)
+  var editBtn = document.getElementById('editBtn');
+  if (editBtn && !hasSchema) editBtn.style.display = 'none';
+
+  // Edit-bar mocht 'ie zichtbaar zijn — sluiten
+  if (!hasSchema) {
+    var eb = document.getElementById('editBar');
+    if (eb) eb.style.display = 'none';
+  }
+
+  // "+ Metadata"-knop in kolommen-sectie
+  var addBtn = document.querySelector('button[onclick="addMetaCol()"]');
+  if (addBtn) addBtn.style.display = hasSchema ? '' : 'none';
+
+  // Metadata-opties uit Weergave-filter ("Alleen met/zonder/incompleet metadata")
+  var mf = document.getElementById('fMetaFilter');
+  if (mf) {
+    Array.from(mf.options).forEach(function(opt) {
+      var v = opt.value;
+      if (v === 'with' || v === 'without' || v === 'incomplete') {
+        opt.disabled = !hasSchema;
+        opt.style.display = hasSchema ? '' : 'none';
+      }
+    });
+    if (!hasSchema && (mf.value === 'with' || mf.value === 'without' || mf.value === 'incomplete')) {
+      mf.value = '';
+    }
+  }
 }
 
 // ====================================================================
@@ -1927,6 +1978,12 @@ function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
   var tekst = document.getElementById('metaWarnText');
   if (!banner || !tekst) return;
   if (totaal === 0) { banner.style.display = 'none'; return; }
+  // Project zonder metadata-schema: korte info-tekst, geen alarmtoon
+  if (_hasMetaSchema === false) {
+    tekst.textContent = 'Dit project heeft geen metadata-schema in Trimble Connect. Bestanden zijn zichtbaar met hun naam, datum en mappenpad — filters en bulk-bewerken zijn daarom niet beschikbaar.';
+    banner.style.display = 'flex';
+    return;
+  }
   var pct = metMeta / totaal;
   var pctTxt = Math.round(pct * 100);
   var legacy = (_metaDiag && _metaDiag.legacyInstances) || 0;
