@@ -970,6 +970,26 @@ async function tcFetch(path, opts) {
   try { return JSON.parse(txt); } catch(_) { return txt; }
 }
 
+// Variant op tcFetch die de TC Core API v2.1 base gebruikt (i.p.v. 2.0).
+// v2.1 levert versionId per file in de items-respons en ondersteunt cursor-paginatie.
+// Bij failure (404 op v2.1) gooit deze door zodat caller terug kan vallen op v2.0.
+async function tcFetchV21(path, opts) {
+  opts = opts || {};
+  await _ensureValidToken();
+  var v21Base = TC_BASE.replace(/\/2\.0$/, '/2.1');
+  var doFetch = function() {
+    var freshReq = _buildTcRequest(path, opts, v21Base);
+    return fetchWithTimeout(freshReq.url, freshReq.init);
+  };
+  var r = await doFetch();
+  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
+  if (!r.ok) { throw new Error(r.status + ' ' + r.statusText); }
+  if (r.status === 204) return null;
+  var txt = await r.text();
+  if (!txt) return null;
+  try { return JSON.parse(txt); } catch(_) { return txt; }
+}
+
 async function tcFetchPSet(path, opts) {
   opts = opts || {};
   await _ensureValidToken();
@@ -1211,10 +1231,41 @@ async function tcAutoFetchData() {
 
 var _fetchedFolders = 0, _totalFolders = 0;
 
+// Globale flag: zodra we voor de eerste folder succesvol v2.1 hebben gebruikt,
+// blijven we op v2.1. Als v2.1 onbeschikbaar blijkt → fallback naar v2.0 voor de hele sessie.
+var _useItemsV21 = true; // optimistische default; wordt false bij eerste failure
+
+async function _fetchFolderItems(folderId) {
+  // Probeer v2.1 (geeft versionId per file). Bij failure: fallback v2.0.
+  if (_useItemsV21) {
+    try {
+      var allItems = [];
+      var skipToken = null;
+      for (var page = 0; page < 50; page++) {
+        var qp = '?pageSize=1000' + (skipToken ? '&skipToken=' + encodeURIComponent(skipToken) : '');
+        var resp = await tcFetchV21('/folders/' + folderId + '/items' + qp);
+        var items = (resp && resp.items) || (Array.isArray(resp) ? resp : []);
+        allItems = allItems.concat(items);
+        skipToken = (resp && resp.links && resp.links.next && resp.links.next.skipToken) || (resp && resp.skipToken) || null;
+        if (!skipToken || !items.length) break;
+      }
+      return allItems;
+    } catch(e) {
+      console.warn('[TC] v2.1 items endpoint niet beschikbaar (' + e.message + ') — fallback naar v2.0 voor deze sessie');
+      _useItemsV21 = false;
+      // Vallen door naar v2.0 hieronder
+    }
+  }
+  // v2.0 fallback (oude gedrag)
+  try {
+    var data = await tcFetch('/folders/' + folderId + '/items');
+    return Array.isArray(data) ? data : (data.items || []);
+  } catch(e) { return []; }
+}
+
 async function tcGetItemsRecursive(folderId, pad, result) {
-  var data;
-  try { data = await tcFetch('/folders/' + folderId + '/items'); } catch(e) { _fetchedFolders++; return; }
-  var items = Array.isArray(data) ? data : (data.items || []);
+  var items;
+  try { items = await _fetchFolderItems(folderId); } catch(e) { _fetchedFolders++; return; }
   var subFolders = [];
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
@@ -1224,7 +1275,17 @@ async function tcGetItemsRecursive(folderId, pad, result) {
       folderIdByPath[volledigPad] = item.id;
       subFolders.push({ id: item.id, pad: volledigPad });
     } else {
-      result.push({ file_location: pad, bestandsnaam: naam, _vid: item.id || '', _versionId: item.versionId || item.id || '', _created: item.createdOn || '', _modified: item.modifiedOn || '', _versie: item.revision || item.version || '' });
+      // Bij v2.1 is item.versionId echt aanwezig en bevat de huidige versionId.
+      // Bij v2.0 fallback is het er niet → val terug op item.id (zelfde als _vid).
+      result.push({
+        file_location: pad,
+        bestandsnaam: naam,
+        _vid: item.id || '',
+        _versionId: item.versionId || item.id || '',
+        _created: item.createdOn || '',
+        _modified: item.modifiedOn || '',
+        _versie: item.revision || item.version || ''
+      });
     }
   }
   _fetchedFolders++;
@@ -1491,10 +1552,10 @@ async function tcGetMetadata(projectId, bestanden) {
   _metaDiag.matchedByName = matchedByName;
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
 
-  // === Tweede pass: enrich versionId voor docs zonder metadata ===
-  // PSet-links hangen vaak aan versionId, maar /folders/X/items geeft die niet terug.
-  // Als veel bestanden ongematched blijven, halen we per bestand /files/{fileId} op
-  // om de actuele versionId te krijgen — daarna match-loop opnieuw.
+  // === Fallback voor onmatched bestanden: alle versies per bestand ophalen ===
+  // De v2.1 items-call geeft ons al de huidige versionId. Maar PSet-instances kunnen
+  // óók aan oudere versies hangen — daar krijgen we via /files/{fileId}/versions ALLE
+  // versionIds, zodat élke historische PSet-instance kan koppelen aan dit bestand.
   var docsZonderMeta = bestanden.filter(function(b) {
     if (!b._vid) return false;
     return !b.document_status && !b.discipline && !b.project_fase
@@ -1502,27 +1563,50 @@ async function tcGetMetadata(projectId, bestanden) {
         && !b.revisie && !b.document_datum;
   });
   var pctZonder = bestanden.length > 0 ? docsZonderMeta.length / bestanden.length : 0;
-  if (docsZonderMeta.length > 5 && pctZonder > 0.3 && instArray.length > 0) {
-    console.log('[TC] ' + docsZonderMeta.length + ' bestanden zonder metadata. Tweede pass: actuele versionIds ophalen...');
+  if (docsZonderMeta.length > 0 && pctZonder > 0.05 && instArray.length > 0) {
+    console.log('[TC] ' + docsZonderMeta.length + ' bestanden zonder metadata. Versies-fallback ophalen...');
     try {
-      tcStep(4, 'loading', 'Versie-info verrijken voor ' + docsZonderMeta.length + ' bestanden...');
-      await enrichVersionIds(docsZonderMeta);
-      // Rebuild versionLookup met de verse versionIds
-      var versionLookup2 = {};
-      bestanden.forEach(function(b) {
-        if (b._versionId) versionLookup2[b._versionId] = b;
-      });
-      // Tweede match-pass tegen reeds opgehaalde instArray
+      tcStep(4, 'loading', 'Versies controleren voor ' + docsZonderMeta.length + ' bestanden...');
+      // Bouw mapping versionId → doc voor ALLE versies van docs zonder metadata
+      var versieMap = {};
+      var enrichOk = 0, enrichFout = 0, enrichFoutVoorbeelden = [];
+      var BATCH = 10;
+      for (var b = 0; b < docsZonderMeta.length; b += BATCH) {
+        var batch = docsZonderMeta.slice(b, b + BATCH);
+        await Promise.all(batch.map(async function(d) {
+          try {
+            var versies = await tcFetch('/files/' + encodeURIComponent(d._vid) + '/versions?tokenThumburl=false');
+            var arr = Array.isArray(versies) ? versies : (versies && versies.items) || [];
+            if (arr.length) {
+              arr.forEach(function(v) {
+                if (v.versionId) versieMap[v.versionId] = d;
+                if (v.id) versieMap[v.id] = d; // soms is id ook een versionId-equivalent
+              });
+              enrichOk++;
+            } else {
+              enrichFout++;
+              if (enrichFoutVoorbeelden.length < 3) enrichFoutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: 'lege response'});
+            }
+          } catch (e) {
+            enrichFout++;
+            if (enrichFoutVoorbeelden.length < 3) enrichFoutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: e.message});
+          }
+        }));
+        var statusEl = document.getElementById('tcStatusText');
+        if (statusEl) statusEl.textContent = 'Versies: ' + Math.min(b + BATCH, docsZonderMeta.length) + '/' + docsZonderMeta.length;
+      }
+      console.log('[TC] Versies-fallback: ' + enrichOk + ' bestanden, ' + Object.keys(versieMap).length + ' versionIds in mapping (' + enrichFout + ' fouten)');
+      // Tweede match-pass tegen instArray
       var extra = 0;
       for (var k = 0; k < instArray.length; k++) {
         var inst2 = instArray[k];
         var link2 = inst2.link || '';
         if (!/^frn:tcfile:/.test(link2)) continue;
         var vid2 = link2.replace(/^frn:tcfile:/, '').split('@')[0];
-        var b2 = versionLookup2[vid2];
+        var b2 = versieMap[vid2];
         if (!b2) continue;
-        // Skip als dit bestand inmiddels al metadata heeft
-        if (b2.document_status || b2.discipline || b2.titel || b2.bedrijf) continue;
+        // Skip als dit bestand al metadata heeft (uit eerste pass of een eerdere instance in deze loop)
+        if (b2.document_status || b2.discipline || b2.titel || b2.bedrijf || b2.document_nummer) continue;
         b2._canEdit = (inst2._actions || []).indexOf('pset:PutPSet') >= 0;
         b2._psetLink = link2;
         var props2 = inst2.props || {};
@@ -1536,9 +1620,12 @@ async function tcGetMetadata(projectId, bestanden) {
       }
       _metaDiag.matchedByVersion = (_metaDiag.matchedByVersion || 0) + extra;
       _metaDiag.matched = (_metaDiag.matched || 0) + extra;
-      console.log('[TC] Tweede pass: ' + extra + ' extra bestanden gekoppeld via versionId');
+      _metaDiag.enrichOk = enrichOk;
+      _metaDiag.enrichFout = enrichFout;
+      _metaDiag.enrichFoutVoorbeelden = enrichFoutVoorbeelden;
+      console.log('[TC] Versies-fallback: ' + extra + ' extra bestanden gekoppeld');
     } catch (e) {
-      console.warn('[TC] Tweede pass mislukt:', e.message);
+      console.warn('[TC] Versies-fallback mislukt:', e.message);
     }
   }
 
@@ -1563,38 +1650,6 @@ function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
   tekst.textContent = 'Mogelijk niet alle metadata zichtbaar — slechts ' + metMeta + ' van ' + totaal + ' bestanden hebben zichtbare metadata (' + pctTxt + '%). ' + ontbreekt + ' ontbreken.';
   banner.style.display = 'flex';
 }
-
-// Vraag /files/{fileId} per bestand op om de actuele versionId te achterhalen.
-// Werkt parallel in batches van 10 om TC niet te overspoelen.
-async function enrichVersionIds(docsArr) {
-  var BATCH = 10;
-  var done = 0, ok = 0, fout = 0, foutVoorbeelden = [];
-  for (var b = 0; b < docsArr.length; b += BATCH) {
-    var batch = docsArr.slice(b, b + BATCH);
-    await Promise.all(batch.map(async function(d) {
-      try {
-        var info = await tcFetch('/files/' + encodeURIComponent(d._vid));
-        if (info && info.versionId) { d._versionId = info.versionId; ok++; }
-        else { fout++; if (foutVoorbeelden.length < 3) foutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: 'geen versionId in respons'}); }
-      } catch (e) {
-        fout++;
-        if (foutVoorbeelden.length < 3) foutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: e.message});
-      }
-    }));
-    done += batch.length;
-    var statusEl = document.getElementById('tcStatusText');
-    if (statusEl) statusEl.textContent = 'Versie-info: ' + done + '/' + docsArr.length;
-  }
-  console.log('[TC] enrichVersionIds: ' + ok + ' succesvol, ' + fout + ' mislukt van ' + docsArr.length + ' bestanden');
-  if (fout > 0) console.warn('[TC] enrich-fouten voorbeelden:', JSON.stringify(foutVoorbeelden, null, 2));
-  // Bewaar in diagnose voor de Diagnose-knop
-  if (typeof _metaDiag === 'object' && _metaDiag) {
-    _metaDiag.enrichOk = ok;
-    _metaDiag.enrichFout = fout;
-    _metaDiag.enrichFoutVoorbeelden = foutVoorbeelden;
-  }
-}
-
 
 // === DASHBOARD ===
 function toonDashboard() { goTo('pgDash'); renderDash(); }
