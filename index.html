@@ -839,6 +839,13 @@ async function initTCExtension() {
   goTo('pgLoading');
 
   try {
+    // Detecteer of we vanuit At Fielt Cockpit zijn geopend
+    var _fromCockpit = (function(){
+      try { return new URLSearchParams(location.search).get('from') === 'cockpit'; }
+      catch(e) { return false; }
+    })();
+    var _COCKPIT_URL = 'https://tomtietom.github.io/trimble-dashboard-project-/';
+
     // Stap 1: Verbinden
     var apiLib = await waitForWorkspaceAPI(10000);
     tcAPI = await apiLib.connect(window.parent, function(event, data) {
@@ -851,8 +858,22 @@ async function initTCExtension() {
           || (event === 'extension.accessToken' && typeof data.data === 'string' ? data.data : null);
         if (token && token.length > 20) { tcToken = token; console.log('[TC] Token via event, lengte:', token.length); }
       }
+      // Cockpit-context: subMenu-klikken in zijbalk → navigeer naar de juiste extensie
+      if (_fromCockpit && event === 'extension.command' && data && typeof data.data === 'string') {
+        var cmd = data.data;
+        var TARGETS = {
+          'open_cockpit': _COCKPIT_URL,
+          'open_project_dashboard': 'https://tomtietom.github.io/trimble-project-dashboard/?from=cockpit',
+          'open_project_upload': 'https://tomtietom.github.io/trimble-project-upload/?from=cockpit',
+          'open_rechten_viewer': 'https://tomtietom.github.io/trimble-rechten-viewer/?from=cockpit'
+        };
+        if (TARGETS[cmd]) {
+          var sep = TARGETS[cmd].indexOf('?') >= 0 ? '&' : '?';
+          window.location.href = TARGETS[cmd] + sep + 'v=' + Date.now();
+        }
+      }
     }, 15000);
-    console.log('[TC] Verbonden met Workspace API');
+    console.log('[TC] Verbonden met Workspace API', _fromCockpit ? '(uit cockpit)' : '');
 
     // Project info
     tcProject = await tcAPI.project.getCurrentProject();
@@ -868,14 +889,16 @@ async function initTCExtension() {
     else { TC_BASE = TC_API_REGIONS.europe; PSET_BASE = PSET_REGIONS.europe; }
     console.log('[TC] Regio:', loc, '-> API:', TC_BASE);
 
-    // Sidebar menu (probeer beide methodes)
-    var menuDef = {
-      title: 'Documentenlijst Viewer',
-      icon: 'https://tomtietom.github.io/tc-viewer/icon.png',
-      command: 'open_doclist'
-    };
-    if (tcAPI.ui && typeof tcAPI.ui.setMenu === 'function') { tcAPI.ui.setMenu(menuDef); }
-    else if (tcAPI.extension && typeof tcAPI.extension.setMenu === 'function') { tcAPI.extension.setMenu(menuDef); }
+    // Sidebar menu — niet overschrijven als geopend vanuit cockpit
+    if (!_fromCockpit) {
+      var menuDef = {
+        title: 'Documentenlijst Viewer',
+        icon: 'https://tomtietom.github.io/tc-viewer/icon.png',
+        command: 'open_doclist'
+      };
+      if (tcAPI.ui && typeof tcAPI.ui.setMenu === 'function') { tcAPI.ui.setMenu(menuDef); }
+      else if (tcAPI.extension && typeof tcAPI.extension.setMenu === 'function') { tcAPI.extension.setMenu(menuDef); }
+    }
 
     // Start data ophalen
     tcAutoFetchData();
