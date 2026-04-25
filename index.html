@@ -1389,23 +1389,62 @@ async function tcGetMetadata(projectId, bestanden) {
   // Haal PSet instances op — gepagineerd met Range-header, anders missen
   // we instances bij grote projecten
   var instArray = [];
+  // Track welke paginatie-methode werkt zodat we het kunnen rapporteren in diagnose
+  var psetPaginatieMethode = 'onbekend';
+  var psetRawDuplicaten = 0;
   try {
-    // Let op: TC legt zelf een max op per call (observatie: 100), ongeacht onze Range-header.
-    // Dus stop alleen bij een lege response — NIET bij items.length < pageSize (dat triggerde
-    // voorheen te vroeg bij projecten met meer instances).
-    var start = 0, pageSize = 500, pages = 0;
+    // PSet API negeert Range-headers en geeft op elke call dezelfde 100 items.
+    // Echte paginatie via top + skiptoken query-params (cursor-based).
+    var skiptoken = null;
+    var pages = 0;
+    var seenInstanceLinks = {};
     while (true) {
-      var r = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets', {
-        extraHeaders: { 'Range': 'items=' + start + '-' + (start + pageSize - 1) }
-      });
+      var qp = '?top=500';
+      if (skiptoken) qp += '&skiptoken=' + encodeURIComponent(skiptoken);
+      var r = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/psets' + qp);
       var items = (r && r.items) || (Array.isArray(r) ? r : []);
       pages++;
       if (!items.length) break;
-      instArray = instArray.concat(items);
-      start += items.length; // offset op basis van daadwerkelijk ontvangen aantal
-      if (pages > 50) { console.warn('[TC] PSet paginatie stop na 50 pages (safety)'); break; }
+      // Vroege detectie van paginatie-loop: als alle items in deze page al gezien zijn,
+      // negeert TC blijkbaar onze cursor → stoppen (anders eindeloze duplicaten)
+      var nieuweInDezePage = 0;
+      items.forEach(function(it) {
+        var link = it && it.link;
+        if (link && !seenInstanceLinks[link]) {
+          seenInstanceLinks[link] = true;
+          instArray.push(it);
+          nieuweInDezePage++;
+        } else if (link) {
+          psetRawDuplicaten++;
+        }
+      });
+      // Lees skiptoken uit response (probeer meerdere veldnamen)
+      var nextToken = null;
+      if (r && r.links && r.links.next) nextToken = r.links.next.skiptoken || r.links.next.skipToken || r.links.next;
+      if (!nextToken && r && r.skiptoken) nextToken = r.skiptoken;
+      if (!nextToken && r && r.skipToken) nextToken = r.skipToken;
+      if (!nextToken && r && r.nextPageToken) nextToken = r.nextPageToken;
+      // Als de response geen cursor geeft maar wel ≥pageSize items, probeer skip-via-aantal als fallback
+      if (!nextToken && items.length >= 500) {
+        // Geen cursor — kunnen niet zinvol pagineren. Stop.
+        psetPaginatieMethode = 'top-only (geen cursor)';
+        break;
+      }
+      // Als geen nieuwe items in deze page: TC geeft hetzelfde terug, paginatie werkt niet
+      if (nieuweInDezePage === 0) {
+        psetPaginatieMethode = pages === 1 ? 'top-only' : 'cursor-faalt-of-leeg';
+        break;
+      }
+      if (!nextToken) {
+        // Geen volgende page — alles gezien
+        psetPaginatieMethode = 'cursor (' + pages + ' pages)';
+        break;
+      }
+      skiptoken = String(nextToken);
+      psetPaginatieMethode = 'cursor';
+      if (pages > 100) { console.warn('[TC] PSet paginatie stop na 100 pages (safety)'); break; }
     }
-    console.log('[TC] PSet instances opgehaald: ' + instArray.length + ' in ' + pages + ' pages');
+    console.log('[TC] PSet instances opgehaald: ' + instArray.length + ' uniek in ' + pages + ' pages (methode: ' + psetPaginatieMethode + ', ' + psetRawDuplicaten + ' duplicaten in respons)');
   } catch(e) {
     console.warn('[TC] PSet ophalen mislukt:', e.message);
     return;
@@ -1504,6 +1543,8 @@ async function tcGetMetadata(projectId, bestanden) {
     lookupVidSample: Object.keys(lookup).slice(0, 3),
     unmatched: [],
     nonFileLinks: 0,
+    psetPaginatieMethode: psetPaginatieMethode,
+    psetRawDuplicaten: psetRawDuplicaten,
     bouwtijd: new Date().toISOString()
   };
   // Dedup: TC's PSet API kan bij paginatie dezelfde instance meerdere keren retourneren.
@@ -3000,7 +3041,9 @@ function kopieerDiagnose(btn) {
       tekst += '  fout-voorbeelden: ' + JSON.stringify(d.enrichFoutVoorbeelden) + '\n';
     }
   }
-  if (d.dupInstances != null) tekst += 'PSet duplicaat-instances overgeslagen: ' + d.dupInstances + '\n';
+  if (d.dupInstances != null) tekst += 'PSet duplicaat-instances overgeslagen (na paginatie): ' + d.dupInstances + '\n';
+  if (d.psetPaginatieMethode != null) tekst += 'PSet paginatie-methode: ' + d.psetPaginatieMethode + '\n';
+  if (d.psetRawDuplicaten != null) tekst += 'PSet duplicaten in raw responses: ' + d.psetRawDuplicaten + '\n';
   if (d.useItemsV21 != null) tekst += 'TC items endpoint: ' + (d.useItemsV21 ? 'v2.1 (met versionId)' : 'v2.0 (fallback, zonder versionId)') + '\n';
   tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
   tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
