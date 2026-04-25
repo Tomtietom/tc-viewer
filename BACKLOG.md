@@ -1,29 +1,51 @@
 # Backlog — tc-viewer
 
-Zaken die opgepakt moeten worden in een volgende sessie. Geprioriteerd op impact.
+Open punten en ideeën voor volgende sessies. Geprioriteerd op impact.
+
+Laatst bijgewerkt: 2026-04-25.
 
 ---
 
-## Feedback Martin (2026-04-21)
+## ✅ Recent afgerond (referentie)
 
-Uit mail met bugmeldingen + verbeterpunten. Metadata-bug is al gefixt (paginatie + robuuste VID-match in commit `b476eb0`). Rest staat hieronder.
+Opgenomen in v3.2 (april 2026):
+- **Volledige metadata** via achtergrond-scan op per-bestand PSet endpoint (commit `999e71d`)
+- Voortgangs-indicator + verfijnde banner-tekst (commit `5c7edc5`)
+- 404-spam in browser-console weggewerkt via tc-proxy update (commit `e169834` + Cloudflare deploy)
+
+Opgenomen in v3.1 (april 2026):
+- Auto-aanvullen bij vrije-tekstvelden
+- Klikbare mappenlocatie in detailpaneel
+- Auto-refresh banner bij nieuwe/gewijzigde documenten
+- Versie-keuze bij release toevoegen, delen, ZIP-download
+- Versie-historie in detailpaneel
+- Diagnose-knop rechts onderin
+- Soepelere kolombreedtes (sleep-zone, dubbelklik, reset)
+- Download vanuit release volgt mappenstructuur
 
 ---
 
-### 🐛 Bug — Download vanuit release geeft andere mapstructuur
+## 🐛 Bugs (open)
 
-**Symptoom:** Als je een release downloadt via de release-tab, komt de output als een "platte" / verkorte mappenstructuur binnen. Terwijl hetzelfde bestand vanuit de doclijst wél in de volledige structuur wordt gezipt. Gebruiker verwacht gelijk gedrag.
+### Filter-bug (open sinds 2026-04-20)
 
-**Te onderzoeken:**
-- Waar zit de verschillende ZIP-logica: `downloadZIP()` (doclijst) vs `downloadRelease()` (release-tab)
-- `file_location` moet bij release-bestanden ook de volledige TC-mappenpad bevatten
-- Release-bestanden hebben mogelijk alleen `name` en missen het `parentId`-pad — dan moeten we het pad aanvullen vanuit `docs[]` via VID-match
+Gebruiker meldde: filters werken niet goed. Symptomen onbekend — Martin's mail noemde geen specifiek filter-probleem.
 
-**Acceptatie:** Download vanuit release = identieke ZIP als download vanuit doclijst met dezelfde bestanden.
+**Bij volgende sessie vragen:**
+- Welk filter precies? (Bestandstype-chips, kolom-dropdowns, release, metadata-aanwezigheid, mappen, zoekbox)
+- In welk project en met welke filter-combinatie?
+- Screenshot/console-output
+
+**Verdachten:**
+- Werkt `resetFilters()` volledig na recente wijzigingen (includedExts, extChips)?
+- Combinatie metadata-filter + extensie-filter + map-selectie consistent?
+- Filter-dropdown voor dynamisch-EDITABLE velden werkt?
 
 ---
 
-### ✨ Feature — Release-tab eigen meerwaarde geven
+## ✨ Features (open, prioritair)
+
+### Release-tab eigen meerwaarde geven
 
 **Probleem:** De release-tab is nu een afgeslankte kopie van de doclijst. Martin's vraag: wat is de meerwaarde?
 
@@ -34,7 +56,7 @@ Uit mail met bugmeldingen + verbeterpunten. Metadata-bug is al gefixt (paginatie
 | ✅ Filteren | ❌ | ✅ |
 | ✅ Losse docs selecteren | ❌ | ✅ |
 | ✅ Kolom-sortering | ❌ | ✅ |
-| ✅ ZIP download met mappenstructuur | ❌ (platte ZIP) | ✅ |
+| ✅ ZIP download met mappenstructuur | ✅ (nu gefixt) | ✅ |
 | — | — | ✅ Filter op release-status (open/gesloten/ontvanger/verzender) |
 
 **Implementatie schets:**
@@ -43,14 +65,11 @@ Uit mail met bugmeldingen + verbeterpunten. Metadata-bug is al gefixt (paginatie
 - Per-document checkboxes + bulk-acties (download geselecteerde subset, deel geselecteerde subset)
 - Als dit klaar is: eventueel de release-keuzelijst in doclijst-zijbalk weghalen → duidelijker verschil tussen de twee tabs
 
-**Keuze om te maken:**
-- Hergebruik van de doclijst-tabel in release-view vs. een eigen compactere variant
+**Keuze om te maken:** Hergebruik van de doclijst-tabel in release-view vs. een eigen compactere variant.
 
----
+### Filter op release-status
 
-### ✨ Feature — Filter op release-status
-
-In de release-overzichtspagina (pgRel) filters toevoegen:
+In de release-overzichtspagina (`pgRel`) filters toevoegen:
 
 - **Status**: open / gesloten / concept
 - **Rol**: ontvanger / verzender
@@ -60,39 +79,82 @@ Plek: bovenaan `pgRel`, naast de huidige lijst. Styling consistent met doclijst-
 
 ---
 
-### ✨ Feature — Auto-aanvullen bij vrije-tekstvelden
+## 🎨 UI / UX verbeteringen (open)
 
-**Martin:** *"Norman doelt erop dat als je begint te typen je een voorstel krijgt van wat al in die velden staat. Niet een standaard vooringevulde lijst — dit beperkt de flexibiliteit."*
+### Indicator-positie en zichtbaarheid (uit v3.2-werk)
 
-**Scope:** Elk metadata-veld dat handmatig invoer heeft (niet enum). Concreet in ieder geval: `bedrijf`, `titel`, `bouwdeel`, `bouwnummer`, `document_nummer`, `document_soort`, `tags`.
+**Huidig:** Pulsende pill rechts onderin (`Metadata laden — X van Y`). Werkt, maar kan verfijnd:
+- Bij grote tabellen scrollt de pill mee onderaan, soms uit zicht
+- Tom kan overwegen 'm sticky te plakken aan de onderrand van de viewport
 
-**Implementatie:**
-- Bij edit-mode: vervang `<input type="text">` door input met autocomplete-lijst (HTML5 `<datalist>` met unieke waarden uit andere docs voor dat veld)
-- Werkt ook in de bulk-edit input
-- Geen hardcoded lijst — alleen voorstellen uit wat er al in het project staat
+### Banner-tekst en banner-styling
 
-**Voordeel:** Consistentie in data (minder varianten van "VolkerWessels" / "Volker Wessels" / "VW"), maar gebruiker blijft vrij om af te wijken.
+**Huidig:** Banner toont nu 3 verschillende teksten (tijdens scan / lage dekking / legacy). Werkt, maar:
+- Visueel zelfde gele tint voor zowel info als waarschuwing
+- Kan baat hebben bij een soft "info"-variant (lichtblauw) tijdens scan i.p.v. waarschuwingsgeel
+- Banner-positie is bovenin tabel — bij smalle vensters duwt 'ie content naar beneden
+
+### Re-render tijdens scan optimaliseren
+
+**Huidig:** Elke 50 voltooide calls → volledige `renderT()`. Bij grote tabellen (Vestzicht 2611 docs) kost dit zichtbaar tijd.
+**Beter:** Per-rij DOM-update voor de specifieke docs die metadata kregen. Alleen nodig als users last melden.
+
+### Mobiel (Safari) ondersteuning
+
+**Status:** Bekende beperking — TC extensies werken niet op mobile Safari (apart geheugenitem). Niet in extensie op te lossen.
+
+### Collapsible sidebar-secties
+
+Bij projecten met veel filters + kolommen scrolt de zijbalk lang. Idee:
+- Filters / Bestandstype / Weergave / Mappen elk in een uitklapbare sectie
+- Onthouden welke open zijn per project (sessionStorage)
+
+Alleen doen als de huidige stijl-consolidatie onvoldoende rust heeft gebracht.
+
+### Header-dropdown voor secundaire acties
+
+ZIP, CSV, Releases, Delen kunnen onder een ⋮-menu in de header. Maakt primaire acties prominenter. Alleen als gebruikers melden dat de huidige top-bar te druk oogt.
+
+### Diagnose-rapport: visualisatie i.p.v. tekst
+
+**Huidig:** Knop kopieert pure tekst naar klembord.
+**Beter (klein):** Modal met de tekst getoond + één-klik kopiëren. Voor support handiger om mee te lezen.
 
 ---
 
-### 🐛 Filter-bug (open sinds 2026-04-20)
+## 💡 Ideeën / later
 
-Gebruiker meldde: **filters werken niet goed**. Symptomen nog onbekend — Martin's mail gaf geen specifiek filter-probleem aan, dus dit blijft een apart item.
+### Hub: extension_config voor andere extensie-voorkeuren
 
-Bij volgende sessie vragen:
-- Welk filter precies? (Bestandstype-chips, kolom-dropdowns, release, metadata-aanwezigheid, mappen, zoekbox)
-- In welk project en met welke filter-combinatie?
-- Screenshot/console-output helpt
+Per project kunnen we via de hub opslaan: filter-defaults, groepering-default, default-kolomprofiel-per-rol. Hub-database heeft al de velden, alleen UI rond.
 
-Verdachten:
-- Werkt `resetFilters()` volledig na de recente wijzigingen (includedExts, extChips)?
-- Combinatie metadata-filter + extensie-filter + map-selectie consistent?
-- Filter-dropdown voor dynamisch-EDITABLE velden werkt?
+### Token-refresh debug-knop
+
+Voor support-scenario's: een knop in Diagnose-modal die `_tcTokenExp = Date.now() - 1000` zet en een actie uitvoert, zodat we live kunnen zien of token-refresh werkt zonder te hoeven wachten op verloop.
+
+### TC-support ticket: 100-instance limiet bulk-PSet
+
+Onze deep-scan bouwt om het 100-limiet heen, maar 750 calls voor één project blijft een workaround. Ticket bij Trimble met verzoek om:
+- Verhoging of opheffing 100-limiet op `/libs/{lib}/psets`
+- Of: bulk-query endpoint (`POST /psets/_query` of vergelijkbaar)
+
+Bij positief antwoord: deep-scan-loop vervangen door 1 call.
+
+### Batch-endpoint in tc-proxy
+
+Mochten we toch in proxy zitten: `POST /pset/eu/batch` dat een array frns accepteert en alleen gevonden items retourneert. Voor 750 bestanden: 1 request i.p.v. 750. Niet kritiek nu (8 sec scan is snel), maar mooi voor schaalbaarheid.
+
+### v2.1 items endpoint onderzoeken
+
+Geeft 400 op `/folders/{id}/items?pageSize=1000`. Apart onderzoek waard — kan zijn dat er een verplichte query-parameter mist of dat we Range-header moeten gebruiken in plaats van pageSize.
 
 ---
 
-## Ideeën / later
+## 🔒 Niet meer relevant (verwijderd uit deze backlog)
 
-- Hub: extension_config ook voor andere extensie-voorkeuren per project (filter-defaults, groepering-default)
-- Token-refresh: handmatige test-knop voor debugging (`_tcTokenExp = Date.now() - 1000` en actie uitvoeren)
-- UI-simplicatie stap 2: collapsible sidebar-secties + header-dropdown voor secundaire acties (ZIP, CSV). Alleen doen als de stijl-consolidatie onvoldoende rust heeft gebracht.
+Voor de zekerheid genoteerd voor wie deze file later leest:
+- ~~Bug: Download vanuit release platte mapstructuur~~ → opgelost in v3.1
+- ~~Feature: Auto-aanvullen vrije-tekstvelden~~ → opgelost in v3.1
+- ~~Feature: Volledige metadata bij grote projecten~~ → opgelost in v3.2
+- ~~Bug: Metadata mist bij grote projecten (paginatie)~~ → opgelost in v3.2 deep-scan
+- ~~UI: 404-spam in browser-console~~ → opgelost in v3.2 via tc-proxy update
