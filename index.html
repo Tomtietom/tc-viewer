@@ -1772,7 +1772,13 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
         if (resp.status === 200) {
           var txt = await resp.text();
           var inst = txt ? JSON.parse(txt) : null;
-          if (inst && inst.props) {
+          if (inst && inst.found === false) {
+            // tc-proxy zet 404 om naar 200 met {found:false} om browser-console schoon te houden.
+            // Dezelfde semantiek als een echte 404: bestand heeft geen PSet.
+            b._psetChecked = true;
+            _psetDeepCacheSet(projectId, vid, { props: null, status: 404 });
+            _deepScan.leeg++;
+          } else if (inst && inst.props) {
             _applyPSetPropsToBestand(b, inst.props, inst.link || link);
             _psetDeepCacheSet(projectId, vid, { props: inst.props, status: 200 });
             _deepScan.succes++;
