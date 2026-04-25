@@ -312,6 +312,13 @@ td a:hover{color:var(--af);text-decoration:underline}
 
 /* Updates-banner (nieuwe/gewijzigde docs gedetecteerd) */
 .updates-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#fff8e1;border-bottom:1px solid #f0dcc8;font-size:var(--fs-sm);color:var(--g6)}
+.meta-warn-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#fde8e8;border-bottom:1px solid #f5c0c0;font-size:var(--fs-sm);color:#8a3a3a}
+.meta-warn-banner .mw-icon{font-size:14px}
+.meta-warn-banner .mw-text{flex:1;font-weight:500}
+.meta-warn-banner .mw-btn{padding:4px var(--s3);border:1px solid var(--warn);border-radius:var(--r-sm);background:#fff;color:var(--warn);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
+.meta-warn-banner .mw-btn:hover{background:var(--warn);color:#fff}
+.meta-warn-banner .mw-close{cursor:pointer;font-size:16px;color:#8a3a3a;padding:0 var(--s1);user-select:none}
+.meta-warn-banner .mw-close:hover{color:var(--warn)}
 .updates-banner .ub-icon{font-size:14px}
 .updates-banner .ub-text{flex:1;font-weight:500}
 .updates-banner .ub-btn{padding:4px var(--s3);border:1px solid var(--hl);border-radius:var(--r-sm);background:#fff;color:var(--g5);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
@@ -464,6 +471,12 @@ td a:hover{color:var(--af);text-decoration:underline}
     <div class="tree" id="treeList"></div>
   </div>
   <div class="main">
+    <div id="metaWarnBanner" class="meta-warn-banner" style="display:none">
+      <span class="mw-icon">&#9888;</span>
+      <span class="mw-text" id="metaWarnText"></span>
+      <button class="mw-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport voor support">&#9432; Diagnose kopi&euml;ren</button>
+      <span class="mw-close" onclick="document.getElementById('metaWarnBanner').style.display='none'" title="Verbergen">&times;</span>
+    </div>
     <div id="updatesBanner" class="updates-banner" style="display:none">
       <span class="ub-icon">&#128276;</span>
       <span class="ub-text" id="updatesBannerText"></span>
@@ -606,6 +619,13 @@ let PSET_BASE = PSET_REGIONS.europe;
 function getTcRegion() {
   return TC_BASE.indexOf('app21') >= 0 ? 'eu'
        : TC_BASE.indexOf('app31') >= 0 ? 'ap' : 'us';
+}
+
+// HTML-escape voor user/TC-data die in innerHTML belandt.
+// Voorkomt XSS via metadata zoals titel/tags/bedrijf en status-waarden.
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 const VERPLICHT = ['document_status','discipline','project_fase','document_datum'];
@@ -1140,7 +1160,7 @@ async function tcAutoFetchData() {
     // === AUTOCOMPLETE-VOORSTELLEN opbouwen ===
     try { bouwDatalists(); } catch(e) { console.warn('[TC] Datalists bouwen mislukt:', e.message); }
 
-    // === DIAGNOSTIEK: metadata check ===
+    // === DIAGNOSTIEK: metadata check + waarschuwing voor user ===
     var metaDocs = docs.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; });
     console.log('[TC] Docs met metadata:', metaDocs.length, '/', docs.length);
     if (metaDocs.length > 0) {
@@ -1148,6 +1168,8 @@ async function tcAutoFetchData() {
     } else {
       console.warn('[TC] GEEN docs met metadata gevonden! PROP_MAP:', PROP_MAP);
     }
+    // Waarschuwingsbanner als <90% van bestanden metadata heeft
+    try { toonMetaWaarschuwingIndienNodig(metaDocs.length, docs.length); } catch(_) {}
 
     // === PROJECT STANDAARD KOLOMMEN LADEN VIA HUB ===
     try { await loadProjectColConfig(); } catch(e) { console.warn('[TC] Project kolom-config laden mislukt:', e.message); }
@@ -1527,22 +1549,49 @@ async function tcGetMetadata(projectId, bestanden) {
   }
 }
 
+// Toon een waarschuwing-banner als minder dan 90% van de bestanden metadata heeft.
+// Geeft user een direct signaal dat hij niet alle data ziet, met diagnose-knop.
+function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
+  var banner = document.getElementById('metaWarnBanner');
+  var tekst = document.getElementById('metaWarnText');
+  if (!banner || !tekst) return;
+  if (totaal === 0) { banner.style.display = 'none'; return; }
+  var pct = metMeta / totaal;
+  if (pct >= 0.9) { banner.style.display = 'none'; return; }
+  var ontbreekt = totaal - metMeta;
+  var pctTxt = Math.round(pct * 100);
+  tekst.textContent = 'Mogelijk niet alle metadata zichtbaar — slechts ' + metMeta + ' van ' + totaal + ' bestanden hebben zichtbare metadata (' + pctTxt + '%). ' + ontbreekt + ' ontbreken.';
+  banner.style.display = 'flex';
+}
+
 // Vraag /files/{fileId} per bestand op om de actuele versionId te achterhalen.
 // Werkt parallel in batches van 10 om TC niet te overspoelen.
 async function enrichVersionIds(docsArr) {
   var BATCH = 10;
-  var done = 0;
+  var done = 0, ok = 0, fout = 0, foutVoorbeelden = [];
   for (var b = 0; b < docsArr.length; b += BATCH) {
     var batch = docsArr.slice(b, b + BATCH);
     await Promise.all(batch.map(async function(d) {
       try {
         var info = await tcFetch('/files/' + encodeURIComponent(d._vid));
-        if (info && info.versionId) d._versionId = info.versionId;
-      } catch (e) { /* slaat over, laat huidige versionId staan */ }
+        if (info && info.versionId) { d._versionId = info.versionId; ok++; }
+        else { fout++; if (foutVoorbeelden.length < 3) foutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: 'geen versionId in respons'}); }
+      } catch (e) {
+        fout++;
+        if (foutVoorbeelden.length < 3) foutVoorbeelden.push({vid: d._vid, naam: d.bestandsnaam, reden: e.message});
+      }
     }));
     done += batch.length;
     var statusEl = document.getElementById('tcStatusText');
     if (statusEl) statusEl.textContent = 'Versie-info: ' + done + '/' + docsArr.length;
+  }
+  console.log('[TC] enrichVersionIds: ' + ok + ' succesvol, ' + fout + ' mislukt van ' + docsArr.length + ' bestanden');
+  if (fout > 0) console.warn('[TC] enrich-fouten voorbeelden:', JSON.stringify(foutVoorbeelden, null, 2));
+  // Bewaar in diagnose voor de Diagnose-knop
+  if (typeof _metaDiag === 'object' && _metaDiag) {
+    _metaDiag.enrichOk = ok;
+    _metaDiag.enrichFout = fout;
+    _metaDiag.enrichFoutVoorbeelden = foutVoorbeelden;
   }
 }
 
@@ -1674,7 +1723,8 @@ function vulExtChips() {
   Array.from(includedExts).forEach(function(e) { if (!counts[e]) includedExts.delete(e); });
   c.innerHTML = keys.map(function(e) {
     var sel = includedExts.has(e);
-    return '<span class="ext-chip' + (sel ? ' sel' : '') + '" onclick="toggleExt(\'' + e + '\')" title="' + counts[e] + ' bestanden — klik om ' + (sel ? 'deselecteren' : 'alleen deze te tonen') + '">.' + e + ' <span class="n">' + counts[e] + '</span></span>';
+    var eEsc = esc(e);
+    return '<span class="ext-chip' + (sel ? ' sel' : '') + '" onclick="toggleExt(\'' + eEsc + '\')" title="' + counts[e] + ' bestanden — klik om ' + (sel ? 'deselecteren' : 'alleen deze te tonen') + '">.' + eEsc + ' <span class="n">' + counts[e] + '</span></span>';
   }).join('');
 }
 
@@ -1784,7 +1834,7 @@ function mkTR(naam, cnt, depth, hasCh, pad) {
   var w = document.createElement('div'), row = document.createElement('div'); row.className = 'tr-row';
   if (pad !== undefined) row.dataset.pad = pad;
   var tog = hasCh ? '<span class="tr-tog'+(depth<=0?' open':'')+'" onclick="event.stopPropagation();togN(this)">&#9654;</span>' : '<span class="tr-tog"></span>';
-  row.innerHTML = tog+'<span class="tr-ico">'+(depth<=0?'&#128193;':'&#128194;')+'</span><span class="tr-nm">'+naam+'</span><span class="tr-cnt">'+cnt+'</span>';
+  row.innerHTML = tog+'<span class="tr-ico">'+(depth<=0?'&#128193;':'&#128194;')+'</span><span class="tr-nm">'+esc(naam)+'</span><span class="tr-cnt">'+esc(cnt)+'</span>';
   w.appendChild(row); return w;
 }
 function togN(el) { el.classList.toggle('open'); var ch = el.closest('.tr-row').parentElement.nextElementSibling; if (ch && ch.classList.contains('tr-ch')) ch.classList.toggle('hide'); }
@@ -2030,12 +2080,13 @@ function renderColChecks() {
     var checked = visibleColKeys.has(c.k) ? ' checked' : '';
     var disabled = c.fixed ? ' disabled' : '';
     var isCustom = c.custom || false;
-    html += '<div class="col-row" data-colkey="'+c.k+'">';
+    var ck = esc(c.k);
+    html += '<div class="col-row" data-colkey="'+ck+'">';
     html += '<span class="col-move" title="Verplaats">';
-    html += '<span onclick="moveCol(\''+c.k+'\',-1)">&#9650;</span><span onclick="moveCol(\''+c.k+'\',1)">&#9660;</span></span>';
-    html += '<input type="checkbox" data-ck="'+c.k+'"'+checked+disabled+' onchange="toggleCol(\''+c.k+'\')">';
-    html += '<span class="col-lbl" onclick="this.previousElementSibling.click()">'+c.l+'</span>';
-    if (isCustom) html += '<span class="col-del" onclick="removeCustomCol(\''+c.k+'\')" title="Verwijder">&times;</span>';
+    html += '<span onclick="moveCol(\''+ck+'\',-1)">&#9650;</span><span onclick="moveCol(\''+ck+'\',1)">&#9660;</span></span>';
+    html += '<input type="checkbox" data-ck="'+ck+'"'+checked+disabled+' onchange="toggleCol(\''+ck+'\')">';
+    html += '<span class="col-lbl" onclick="this.previousElementSibling.click()">'+esc(c.l)+'</span>';
+    if (isCustom) html += '<span class="col-del" onclick="removeCustomCol(\''+ck+'\')" title="Verwijder">&times;</span>';
     html += '</div>';
   });
   el.innerHTML = html;
@@ -2117,7 +2168,7 @@ function bouwTH() {
   thCb.appendChild(cb); tr.appendChild(thCb);
   COLS.forEach(function(c) {
     var th = document.createElement('th');
-    th.innerHTML = c.l + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+c.k+'\')" ondblclick="autoFitColumn(event,\''+c.k+'\')" title="Sleep om te verbreden, dubbelklik om passend te maken"></span>';
+    th.innerHTML = esc(c.l) + ' <span class="sa">&#9650;</span><span class="col-resize" onmousedown="startResize(event,\''+esc(c.k)+'\')" ondblclick="autoFitColumn(event,\''+esc(c.k)+'\')" title="Sleep om te verbreden, dubbelklik om passend te maken"></span>';
     // Opgeslagen breedte of default
     if (colWidths[c.k]) th.style.width = colWidths[c.k];
     else if (c.w) th.style.width = c.w;
@@ -2440,9 +2491,9 @@ function tcFileUrl(vid, naam) {
 }
 
 function sBdg(s) {
-  var sl=s.toLowerCase(), c='b-ov';
+  var sl=String(s||'').toLowerCase(), c='b-ov';
   if (sl==='definitief') c='b-def'; else if (sl.indexOf('uitvoering')>=0) c='b-uit'; else if (sl==='concept') c='b-con'; else if (sl==='vervallen') c='b-ver';
-  return '<span class="bdg '+c+'">'+s+'</span>';
+  return '<span class="bdg '+c+'">'+esc(s)+'</span>';
 }
 
 function toonDetail(doc) {
@@ -2453,12 +2504,12 @@ function toonDetail(doc) {
   var pathLoc = doc.file_location || '';
   if (pathLoc && pathLoc !== '(root)') {
     var folderUrl = folderUrlForPath(pathLoc);
-    var escaped = pathLoc.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var escapedPad = esc(pathLoc);
     if (folderUrl) {
-      pathEl.innerHTML = '<a class="dp-path-link" href="' + folderUrl + '" target="_blank" rel="noopener" title="Open deze map in Trimble Connect (nieuw tabblad)">' + escaped + ' &#8599;</a>';
+      pathEl.innerHTML = '<a class="dp-path-link" href="' + esc(folderUrl) + '" target="_blank" rel="noopener" title="Open deze map in Trimble Connect (nieuw tabblad)">' + escapedPad + ' &#8599;</a>';
     } else {
       // Geen folder-ID bekend: fallback op filter-in-extensie
-      pathEl.innerHTML = '<a class="dp-path-link" href="#" title="Klik om naar deze map te filteren">' + escaped + '</a>';
+      pathEl.innerHTML = '<a class="dp-path-link" href="#" title="Klik om naar deze map te filteren">' + escapedPad + '</a>';
       var link = pathEl.querySelector('a');
       if (link) link.addEventListener('click', function(e) { navigateNaarMap(e, pathLoc); });
     }
@@ -2467,7 +2518,12 @@ function toonDetail(doc) {
   }
   var velden = [['Document nummer',doc.document_nummer],['Titel',doc.titel],['Bouwdeel',doc.bouwdeel],['Discipline',doc.discipline],['Fase',doc.project_fase],['Status',doc.document_status],['Revisie',doc.revisie],['Datum',doc.document_datum],['Bedrijf',doc.bedrijf],['Document soort',doc.document_soort],['Tags',doc.tags]];
   var html = '<div class="dp-sec"><h4>Metadata</h4>';
-  velden.forEach(function(f) { if (f[1]) { var d=f[1]; if (f[0]==='Status') d=sBdg(f[1]); html += '<div class="dp-row"><span class="dl">'+f[0]+'</span><span class="dv">'+d+'</span></div>'; } });
+  velden.forEach(function(f) {
+    if (!f[1]) return;
+    // Status krijgt een gekleurde badge (sBdg escapet zelf), andere velden gewoon escaped
+    var waarde = f[0] === 'Status' ? sBdg(f[1]) : esc(f[1]);
+    html += '<div class="dp-row"><span class="dl">'+esc(f[0])+'</span><span class="dv">'+waarde+'</span></div>';
+  });
   html += '</div>';
   // Preview sectie
   if (pid && doc._vid) {
@@ -2516,12 +2572,12 @@ async function laadDetailVersies(vid) {
       var isLatest = i === 0;
       var dt = (v.createdOn || '').substring(0, 10);
       var by = _creatorNaam(v.createdBy);
-      var meta = dt + (by ? ' · ' + by : '');
-      var label = 'Versie ' + (v.revision || (versions.length - i)) + (isLatest ? ' (laatste)' : '');
-      var tcUrl = 'https://web.connect.trimble.com/projects/' + pid + '/files/' + vid + '?versionId=' + v.versionId;
+      var meta = esc(dt + (by ? ' · ' + by : ''));
+      var label = esc('Versie ' + (v.revision || (versions.length - i)) + (isLatest ? ' (laatste)' : ''));
+      var tcUrl = 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(vid) + '?versionId=' + encodeURIComponent(v.versionId || '');
       return '<div class="dp-v' + (isLatest ? ' dp-v-latest' : '') + '">'
         + '<div class="dp-v-info"><div class="dp-v-label">' + label + '</div><div class="dp-v-meta">' + meta + '</div></div>'
-        + '<a class="dp-v-link" href="' + tcUrl + '" target="_blank" title="Open deze versie in Trimble Connect">&#8599;</a>'
+        + '<a class="dp-v-link" href="' + esc(tcUrl) + '" target="_blank" title="Open deze versie in Trimble Connect">&#8599;</a>'
         + '</div>';
     }).join('');
     sec.style.display = '';
@@ -2551,7 +2607,7 @@ async function laadPreview(vid, naam, ext, imgExts) {
     if (ext === 'pdf') {
       el.innerHTML = '<a href="' + objUrl + '" target="_blank" style="display:block;padding:20px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:13px;text-decoration:none">&#128196; PDF openen</a>';
     } else {
-      el.innerHTML = '<img src="' + objUrl + '" alt="' + naam + '">';
+      el.innerHTML = '<img src="' + esc(objUrl) + '" alt="' + esc(naam) + '">';
     }
   } catch(e) {
     el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>';
@@ -2871,6 +2927,12 @@ function kopieerDiagnose(btn) {
   tekst += 'Daarvan gematched: ' + (d.matched != null ? d.matched : '?') + '\n';
   if (d.matchedByVid != null || d.matchedByVersion != null || d.matchedByName != null) {
     tekst += '  via fileId: ' + (d.matchedByVid || 0) + ', via versionId: ' + (d.matchedByVersion || 0) + ', via naam: ' + (d.matchedByName || 0) + '\n';
+  }
+  if (d.enrichOk != null || d.enrichFout != null) {
+    tekst += 'Versie-enrichment (tweede pass): ' + (d.enrichOk || 0) + ' succesvol, ' + (d.enrichFout || 0) + ' mislukt\n';
+    if (d.enrichFoutVoorbeelden && d.enrichFoutVoorbeelden.length) {
+      tekst += '  fout-voorbeelden: ' + JSON.stringify(d.enrichFoutVoorbeelden) + '\n';
+    }
   }
   tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
   tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
@@ -3193,8 +3255,10 @@ async function bulkSave() {
   });
   statusEl.textContent = 'Opslaan: ' + toSave.length + ' bestanden...';
   statusEl.style.color = '#D4821A';
-  var saved = 0, saveError = null;
+  var saved = 0, failed = 0, saveError = null, failedNames = [];
   try {
+    // Token vooraf vernieuwen — bij bulk met veel items willen we niet halverwege expiry
+    await _ensureValidToken();
     var resp = await tcFetchPSet('/psets/changeset', {
       method: 'POST',
       body: { items: changeItems },
@@ -3203,10 +3267,35 @@ async function bulkSave() {
     var respBody = await resp.text();
     console.log('[TC] Bulk changeset response:', resp.status, respBody);
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
-    toSave.forEach(function(doc) { doc[field] = value; });
-    saved = toSave.length;
-    // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
-    try { addDatalistValue(field, value); } catch(_) {}
+    // Parse response: TC retourneert items[] met per-item status
+    var respJson = null;
+    try { respJson = JSON.parse(respBody); } catch (_) {}
+    var respItems = (respJson && Array.isArray(respJson.items)) ? respJson.items : null;
+    if (respItems && respItems.length === toSave.length) {
+      // Per-item check: identificeer welke items succesvol waren
+      respItems.forEach(function(item, idx) {
+        var doc = toSave[idx];
+        // TC markeert fouten via 'error', 'errorMessage' of ontbrekende 'modifiedAt'
+        var heeftFout = item.error || item.errorMessage;
+        if (heeftFout) {
+          failed++;
+          failedNames.push(doc.bestandsnaam);
+          console.warn('[TC] Item geweigerd:', doc.bestandsnaam, item.error || item.errorMessage);
+        } else {
+          doc[field] = value;
+          saved++;
+        }
+      });
+    } else if (respJson && respJson.errorCount > 0) {
+      // Onverwacht response-shape maar TC meldt errors
+      throw new Error('TC weigerde ' + respJson.errorCount + ' van ' + (respJson.itemCount || changeItems.length) + ' items');
+    } else {
+      // Geen detail per item, neem aan dat alles oké is (HTTP 200/201)
+      toSave.forEach(function(doc) { doc[field] = value; });
+      saved = toSave.length;
+    }
+    // Nieuwe waarde incrementeel toevoegen aan datalist
+    if (saved > 0) { try { addDatalistValue(field, value); } catch(_) {} }
   } catch(e) {
     console.warn('[TC] Bulk opslaan mislukt:', e.message);
     saveError = e.message;
@@ -3215,6 +3304,11 @@ async function bulkSave() {
   if (saveError) {
     statusEl.textContent = 'Fout: ' + saveError;
     statusEl.style.color = '#ef4444';
+  } else if (failed > 0) {
+    statusEl.textContent = '\u26A0 ' + saved + ' opgeslagen, ' + failed + ' geweigerd';
+    statusEl.style.color = '#d18000';
+    var voorbeelden = failedNames.slice(0, 5).join(', ') + (failedNames.length > 5 ? ' (+ ' + (failedNames.length - 5) + ' meer)' : '');
+    alert('Niet alles is opgeslagen.\n\n' + saved + ' van ' + toSave.length + ' bestanden gelukt.\n' + failed + ' geweigerd door Trimble Connect:\n\n' + voorbeelden);
   } else {
     statusEl.textContent = '\u2713 ' + saved + ' bestanden opgeslagen';
     statusEl.style.color = '#22c55e';
@@ -3251,6 +3345,14 @@ async function saveCell(doc, field, value, el) {
     var respBody = await resp.text();
     console.log('[TC] Changeset response:', resp.status, respBody);
     if (!resp.ok) throw new Error(resp.status + ' ' + respBody);
+    // TC kan 200 OK retourneren met per-item fouten — check errorCount
+    var respJson = null;
+    try { respJson = JSON.parse(respBody); } catch (_) {}
+    if (respJson && respJson.errorCount > 0) {
+      var itemErr = (respJson.items && respJson.items[0] && (respJson.items[0].error || respJson.items[0].errorMessage)) || 'Onbekende fout';
+      throw new Error('TC weigerde: ' + itemErr);
+    }
+    // Pas NA succesvolle bevestiging de lokale state aanpassen
     doc[field] = value;
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
     // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
@@ -3574,8 +3676,9 @@ function renderVersionFileList(listId, docsArray, ctx) {
       versieInfo = '<span class="rf-v-pill' + (isLatest ? '' : ' rf-v-custom') + '" onclick="toggleVersionPicker(\'' + ctx + '\',' + idx + ')" title="Klik om andere versie te kiezen">' + label + ' ▾</span>';
       pickerHtml = '<div class="rf-v-picker" id="vp_' + ctx + '_' + idx + '" style="display:none"></div>';
     }
+    var nameEsc = esc(d.bestandsnaam);
     return '<div class="rf-row">'
-      + '<div class="rf-row-hd"><span class="rf-name" title="' + d.bestandsnaam.replace(/"/g,'&quot;') + '">' + d.bestandsnaam + '</span>' + versieInfo + '</div>'
+      + '<div class="rf-row-hd"><span class="rf-name" title="' + nameEsc + '">' + nameEsc + '</span>' + versieInfo + '</div>'
       + pickerHtml
       + '</div>';
   });
@@ -3619,9 +3722,9 @@ function toggleVersionPicker(ctx, idx) {
     var selected = (d._selectedVersionId || latestVersionId) === v.versionId;
     var dt = (v.createdOn || v.modifiedOn || '').substring(0, 10);
     var by = _creatorNaam(v.createdBy);
-    var meta = dt + (by ? ' · ' + by : '');
-    var vlabel = 'Versie ' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : '');
-    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickVersion(\'' + ctx + '\',' + idx + ',\'' + v.versionId + '\',' + isLatest + ')">'
+    var meta = esc(dt + (by ? ' · ' + by : ''));
+    var vlabel = esc('Versie ' + (v.revision || (d._versions.length - vi)) + (isLatest ? ' (laatste)' : ''));
+    return '<div class="rf-v-opt' + (selected ? ' sel' : '') + '" onclick="pickVersion(\'' + esc(ctx) + '\',' + idx + ',\'' + esc(v.versionId) + '\',' + isLatest + ')">'
       + '<span class="rf-v-opt-main">' + vlabel + '</span>'
       + '<span class="rf-v-opt-meta">' + meta + '</span>'
       + '</div>';
