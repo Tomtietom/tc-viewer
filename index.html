@@ -1506,9 +1506,15 @@ async function tcGetMetadata(projectId, bestanden) {
     nonFileLinks: 0,
     bouwtijd: new Date().toISOString()
   };
+  // Dedup: TC's PSet API kan bij paginatie dezelfde instance meerdere keren retourneren.
+  // We tracken geziene links zodat we ze maar 1× verwerken (en de count klopt voor diagnose).
+  var seenLinks = {};
+  var dupCount = 0;
   for (var j = 0; j < instArray.length; j++) {
     var inst = instArray[j];
     var link = inst.link || '';
+    if (link && seenLinks[link]) { dupCount++; continue; }
+    if (link) seenLinks[link] = true;
     var b = null;
     var matchVia = null;
     // Link-formaat: "frn:tcfile:{VID}" of "frn:tcfile:{VID}@{versie}"
@@ -1533,6 +1539,8 @@ async function tcGetMetadata(projectId, bestanden) {
       continue;
     }
     matched++;
+    // Markeer dat dit bestand een PSet-instance heeft (ook als props leeg waren)
+    b._matchedFromInstance = true;
     if (matchVia === 'vid') matchedByVid++;
     else if (matchVia === 'version') matchedByVersion++;
     else if (matchVia === 'name') matchedByName++;
@@ -1546,6 +1554,9 @@ async function tcGetMetadata(projectId, bestanden) {
       }
     }
   }
+  if (dupCount > 0) console.log('[TC] PSet paginatie: ' + dupCount + ' duplicaat-instances overgeslagen');
+  _metaDiag.dupInstances = dupCount;
+  _metaDiag.useItemsV21 = _useItemsV21;
   _metaDiag.matched = matched;
   _metaDiag.matchedByVid = matchedByVid;
   _metaDiag.matchedByVersion = matchedByVersion;
@@ -1553,26 +1564,22 @@ async function tcGetMetadata(projectId, bestanden) {
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
 
   // === Fallback voor onmatched bestanden: alle versies per bestand ophalen ===
-  // De v2.1 items-call geeft ons al de huidige versionId. Maar PSet-instances kunnen
-  // óók aan oudere versies hangen — daar krijgen we via /files/{fileId}/versions ALLE
-  // versionIds, zodat élke historische PSet-instance kan koppelen aan dit bestand.
-  var docsZonderMeta = bestanden.filter(function(b) {
-    if (!b._vid) return false;
-    return !b.document_status && !b.discipline && !b.project_fase
-        && !b.bedrijf && !b.titel && !b.bouwdeel && !b.document_nummer
-        && !b.revisie && !b.document_datum;
-  });
-  var pctZonder = bestanden.length > 0 ? docsZonderMeta.length / bestanden.length : 0;
-  if (docsZonderMeta.length > 0 && pctZonder > 0.05 && instArray.length > 0) {
-    console.log('[TC] ' + docsZonderMeta.length + ' bestanden zonder metadata. Versies-fallback ophalen...');
+  // Alleen voor bestanden waar GEEN ENKELE PSet-instance aan gekoppeld kon worden.
+  // Bestanden die wel matchen maar lege props hebben, hebben gewoon geen metadata
+  // ingevuld in TC — die hoeven niet opnieuw bevraagd te worden.
+  // Daarnaast moet er ook iets te halen zijn: niet-gematchte unique unmatched links.
+  var uniqueUnmatchedLinks = Object.keys(seenLinks).length - matched; // proxy voor "ergens aanwezig maar niet gekoppeld"
+  var docsZonderMatch = bestanden.filter(function(b) { return b._vid && !b._matchedFromInstance; });
+  if (docsZonderMatch.length > 0 && uniqueUnmatchedLinks > 0) {
+    console.log('[TC] ' + docsZonderMatch.length + ' bestanden zonder PSet-match en ' + uniqueUnmatchedLinks + ' onmatched instances. Versies-fallback ophalen...');
     try {
-      tcStep(4, 'loading', 'Versies controleren voor ' + docsZonderMeta.length + ' bestanden...');
+      tcStep(4, 'loading', 'Versies controleren voor ' + docsZonderMatch.length + ' bestanden...');
       // Bouw mapping versionId → doc voor ALLE versies van docs zonder metadata
       var versieMap = {};
       var enrichOk = 0, enrichFout = 0, enrichFoutVoorbeelden = [];
       var BATCH = 10;
-      for (var b = 0; b < docsZonderMeta.length; b += BATCH) {
-        var batch = docsZonderMeta.slice(b, b + BATCH);
+      for (var b = 0; b < docsZonderMatch.length; b += BATCH) {
+        var batch = docsZonderMatch.slice(b, b + BATCH);
         await Promise.all(batch.map(async function(d) {
           try {
             var versies = await tcFetch('/files/' + encodeURIComponent(d._vid) + '/versions?tokenThumburl=false');
@@ -1593,20 +1600,24 @@ async function tcGetMetadata(projectId, bestanden) {
           }
         }));
         var statusEl = document.getElementById('tcStatusText');
-        if (statusEl) statusEl.textContent = 'Versies: ' + Math.min(b + BATCH, docsZonderMeta.length) + '/' + docsZonderMeta.length;
+        if (statusEl) statusEl.textContent = 'Versies: ' + Math.min(b + BATCH, docsZonderMatch.length) + '/' + docsZonderMatch.length;
       }
       console.log('[TC] Versies-fallback: ' + enrichOk + ' bestanden, ' + Object.keys(versieMap).length + ' versionIds in mapping (' + enrichFout + ' fouten)');
-      // Tweede match-pass tegen instArray
+      // Tweede match-pass tegen instArray (gededupliceerd)
+      var seenLinks2 = {};
       var extra = 0;
       for (var k = 0; k < instArray.length; k++) {
         var inst2 = instArray[k];
         var link2 = inst2.link || '';
+        if (!link2 || seenLinks2[link2]) continue;
+        seenLinks2[link2] = true;
         if (!/^frn:tcfile:/.test(link2)) continue;
         var vid2 = link2.replace(/^frn:tcfile:/, '').split('@')[0];
         var b2 = versieMap[vid2];
         if (!b2) continue;
-        // Skip als dit bestand al metadata heeft (uit eerste pass of een eerdere instance in deze loop)
-        if (b2.document_status || b2.discipline || b2.titel || b2.bedrijf || b2.document_nummer) continue;
+        // Skip als dit bestand inmiddels al een instance heeft (eerste pass of vorige iteratie)
+        if (b2._matchedFromInstance) continue;
+        b2._matchedFromInstance = true;
         b2._canEdit = (inst2._actions || []).indexOf('pset:PutPSet') >= 0;
         b2._psetLink = link2;
         var props2 = inst2.props || {};
@@ -2989,6 +3000,8 @@ function kopieerDiagnose(btn) {
       tekst += '  fout-voorbeelden: ' + JSON.stringify(d.enrichFoutVoorbeelden) + '\n';
     }
   }
+  if (d.dupInstances != null) tekst += 'PSet duplicaat-instances overgeslagen: ' + d.dupInstances + '\n';
+  if (d.useItemsV21 != null) tekst += 'TC items endpoint: ' + (d.useItemsV21 ? 'v2.1 (met versionId)' : 'v2.0 (fallback, zonder versionId)') + '\n';
   tekst += 'Niet-file links (folder/project/etc): ' + (d.nonFileLinks || 0) + '\n';
   tekst += 'PROP_MAP velden: ' + (d.propMapVelden || 0) + '\n';
   tekst += 'Lookup VIDs: ' + (d.lookupVids || 0) + ' | voorbeeld: ' + JSON.stringify(d.lookupVidSample || []) + '\n\n';
