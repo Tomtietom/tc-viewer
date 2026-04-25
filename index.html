@@ -10,6 +10,8 @@
 <script src="https://atfielt-extension-hub.tom-da0.workers.dev/client.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:0.4}}
+#deepScanIndicator.scanning::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:4px;animation:pulse-dot 1.2s ease-in-out infinite}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Poppins',system-ui,-apple-system,sans-serif;background:#fff;color:#222;min-height:100vh;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 h1,h2,h3,h4{font-family:'Montserrat',system-ui,sans-serif;letter-spacing:-.02em;color:#222}
@@ -496,7 +498,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500;transition:background 0.3s,color 0.3s" title="Metadata wordt op de achtergrond aangevuld voor bestanden die niet in de eerste batch zaten"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -1641,7 +1643,7 @@ async function tcGetMetadata(projectId, bestanden) {
 
 var _deepScan = null; // { actief, totaal, gedaan, succes, leeg, fout, cacheHit, startTs }
 var _DEEP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuten
-var _DEEP_RERENDER_EVERY = 25; // re-render UI elke N voltooide calls
+var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls (lager = snellere updates, hoger = soepelere UI)
 var _DEEP_CONCURRENCY = 10;
 
 function _psetDeepCacheKey(projId, vid) {
@@ -1688,13 +1690,15 @@ function updateDeepScanUI() {
   var ind = document.getElementById('deepScanIndicator');
   if (!ind) return;
   if (!_deepScan || !_deepScan.actief) {
+    ind.classList.remove('scanning');
     ind.style.display = 'none';
     return;
   }
   var done = _deepScan.gedaan, totaal = _deepScan.totaal;
   var pct = totaal > 0 ? Math.round(done / totaal * 100) : 0;
   ind.style.display = 'inline-flex';
-  ind.textContent = 'Metadata-scan: ' + done + '/' + totaal + ' (' + pct + '%)';
+  ind.classList.add('scanning');
+  ind.textContent = 'Metadata laden — ' + done + ' van ' + totaal + ' (' + pct + '%)';
 }
 
 async function tcGetMetadataDeep(projectId, libId, bestanden) {
@@ -1815,7 +1819,8 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
 
   _deepScan.actief = false;
   var duurSec = Math.round((Date.now() - _deepScan.startTs) / 1000);
-  console.log('[TC] Deep-scan klaar in ' + duurSec + 's: ' + _deepScan.succes + ' nieuwe metadata, ' + _deepScan.leeg + ' leeg, ' + _deepScan.fout + ' fout, ' + _deepScan.cacheHit + ' cache-hits');
+  var pctSucces = _deepScan.totaal > 0 ? Math.round(_deepScan.succes / _deepScan.totaal * 100) : 0;
+  console.log('[TC] Deep-scan klaar in ' + duurSec + 's — ' + _deepScan.succes + '/' + _deepScan.totaal + ' bestanden alsnog metadata gevonden (' + pctSucces + '%), ' + _deepScan.leeg + ' bestanden hebben geen PSet, ' + _deepScan.fout + ' fouten, ' + _deepScan.cacheHit + ' cache-hits.');
 
   // Diagnose-snapshot bijwerken
   if (_metaDiag) {
@@ -1837,14 +1842,34 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
   ); } catch(_) {}
   updateDeepScanUI();
 
-  // Klein moment '✓ klaar', dan verbergen
+  // Klein moment ✓-feedback, dan verbergen
   var ind = document.getElementById('deepScanIndicator');
   if (ind && _deepScan.fout < (_deepScan.totaal * 0.05)) {
     ind.style.display = 'inline-flex';
-    ind.textContent = '✓ Metadata compleet';
+    ind.classList.remove('scanning');
+    var msg;
+    if (_deepScan.succes > 0) {
+      msg = '\u2713 ' + _deepScan.succes + ' bestand' + (_deepScan.succes === 1 ? '' : 'en') + ' bijgewerkt';
+    } else {
+      msg = '\u2713 Metadata compleet';
+    }
+    ind.textContent = msg;
+    ind.style.background = '#e7f4ec';
+    ind.style.color = '#2d6a4f';
     setTimeout(function() {
-      if (ind) ind.style.display = 'none';
+      if (ind) {
+        ind.style.display = 'none';
+        ind.style.background = '';
+        ind.style.color = '';
+      }
     }, 4000);
+  } else if (ind && _deepScan.fout >= (_deepScan.totaal * 0.05)) {
+    // Veel fouten → rood maken zodat support kan zien
+    ind.style.display = 'inline-flex';
+    ind.classList.remove('scanning');
+    ind.textContent = '\u26A0 Scan deels mislukt (' + _deepScan.fout + ' fouten) — zie Diagnose';
+    ind.style.background = '#fdecea';
+    ind.style.color = '#a63232';
   }
 }
 
@@ -1865,7 +1890,9 @@ function toonMetaWaarschuwingIndienNodig(metMeta, totaal) {
   var dekkingLaag = pct < 0.9 && ontbreekt > 5;
   // Tijdens de achtergrond-scan: melden dat we nog bezig zijn
   if (scanActief) {
-    tekst.textContent = 'Metadata wordt op de achtergrond opgehaald — ' + (_deepScan.gedaan || 0) + '/' + (_deepScan.totaal || 0) + ' bestanden klaar. Je kan ondertussen gewoon doorwerken.';
+    var d = _deepScan.gedaan || 0, t = _deepScan.totaal || 0;
+    var p = t > 0 ? Math.round(d / t * 100) : 0;
+    tekst.textContent = 'Metadata wordt aangevuld voor bestanden buiten de eerste batch — ' + d + ' van ' + t + ' gecheckt (' + p + '%). De lijst werkt gewoon, nieuwe waarden verschijnen vanzelf.';
     banner.style.display = 'flex';
     return;
   }
