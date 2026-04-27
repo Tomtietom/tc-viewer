@@ -613,6 +613,9 @@ function isMetaCol(key) { return !!key && key.charAt(0) !== '_' && key !== 'best
 // Mapping van mappad → folder-ID uit TC, gevuld tijdens tcGetItemsRecursive.
 // Gebruikt om in navigateNaarMap() de juiste TC folder-URL te kunnen bouwen.
 var folderIdByPath = {};
+// Alle gevonden folder-paden, óók lege mappen (mapS bevat alleen mappen met bestanden).
+// Wordt door bouwBoom() gebruikt zodat de mappen-boom volledig is.
+var allFolderPaths = new Set();
 
 const TC_API_REGIONS = { europe:'https://app21.connect.trimble.com/tc/api/2.0', 'north america':'https://app.connect.trimble.com/tc/api/2.0', asia:'https://app31.connect.trimble.com/tc/api/2.0' };
 const PROXY_BASE = 'https://tc-proxy.tom-da0.workers.dev';
@@ -1339,8 +1342,12 @@ async function tcGetItemsRecursive(folderId, pad, result) {
     var item = items[i];
     var naam = item.name || 'Naamloos';
     var volledigPad = pad ? pad + '/' + naam : naam;
-    if (item.type === 'FOLDER') {
+    // Robuuste type-check: v2.0 kan 'FOLDER' of 'folder' geven, soms zit type in itemType
+    var itemType = (item.type || item.itemType || '').toString().toUpperCase();
+    var isFolder = itemType === 'FOLDER' || itemType === 'DIR';
+    if (isFolder) {
       folderIdByPath[volledigPad] = item.id;
+      allFolderPaths.add(volledigPad);
       subFolders.push({ id: item.id, pad: volledigPad });
     } else {
       // Bij v2.1 is item.versionId echt aanwezig en bevat de huidige versionId.
@@ -2084,10 +2091,10 @@ function renderDash() {
   var vandaag = new Date().toLocaleDateString('nl-NL', {day:'2-digit',month:'long',year:'numeric'});
 
   el.innerHTML =
-    '<div style="margin-bottom:16px"><h2 style="font-family:Montserrat,sans-serif;font-size:20px;font-weight:700">' + projNaam + '</h2><div style="font-size:12px;color:#888">' + vandaag + ' &mdash; ' + total + ' documenten in ' + Object.keys(mapS).length + ' mappen</div></div>' +
+    '<div style="margin-bottom:16px"><h2 style="font-family:Montserrat,sans-serif;font-size:20px;font-weight:700">' + projNaam + '</h2><div style="font-size:12px;color:#888">' + vandaag + ' &mdash; ' + total + ' documenten in ' + ((allFolderPaths && allFolderPaths.size) ? allFolderPaths.size : Object.keys(mapS).length) + ' mappen</div></div>' +
     '<div class="big-stats">' +
     '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Documenten</div><div class="val">' + total + '</div></div>' +
-    '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Mappen</div><div class="val">' + Object.keys(mapS).length + '</div></div>' +
+    '<div class="bstat" style="cursor:pointer" onclick="toonDocs()"><div class="lab">Mappen</div><div class="val">' + ((allFolderPaths && allFolderPaths.size) ? allFolderPaths.size : Object.keys(mapS).length) + '</div></div>' +
     '<div class="bstat" style="cursor:pointer" onclick="filterEnToon(\'document_status\',\'Definitief\')"><div class="lab">Definitief</div><div class="val" style="color:var(--ok)">' + (stCnt['Definitief']||0) + '</div></div>' +
     '<div class="bstat"><div class="lab">Met metadata</div><div class="val" style="color:var(--info)">' + metaPct + '%</div></div>' +
     '<div class="bstat"><div class="lab">Zonder metadata</div><div class="val" style="color:' + (zonderMeta > 0 ? 'var(--warn)' : 'var(--ok)') + '">' + zonderMeta + '</div></div>' +
@@ -2258,9 +2265,23 @@ function bouwBoom() {
   alle.querySelector('.tr-nm').onclick = function() { actMap=null; document.querySelectorAll('.tr-row').forEach(function(r){r.classList.remove('act')}); alle.querySelector('.tr-row').classList.add('act'); renderT(); };
   tree.appendChild(alle);
   var boom = {};
-  Object.keys(mapS).sort().forEach(function(mp) {
+  // Combineer mappen met bestanden (mapS) + lege mappen (allFolderPaths)
+  // Lege mappen anders niet zichtbaar in de boom — geeft incompleet beeld.
+  var alleMpKeys = new Set(Object.keys(mapS));
+  if (allFolderPaths && allFolderPaths.size) {
+    allFolderPaths.forEach(function(p) { if (p && p !== '(root)') alleMpKeys.add(p); });
+  }
+  Array.from(alleMpKeys).sort().forEach(function(mp) {
+    if (mp === '(root)') return; // root tellen we niet als aparte boom-tak
     var dl = mp.split('/').filter(function(d){return d;}), node = boom, pad = '';
-    dl.forEach(function(deel, i) { pad += (i>0?'/':'') + deel; if (!node[deel]) node[deel] = {_ch:{},_cnt:0,_pad:pad,_d:i}; node[deel]._cnt += mapS[mp].length; node = node[deel]._ch; });
+    dl.forEach(function(deel, i) {
+      pad += (i>0?'/':'') + deel;
+      if (!node[deel]) node[deel] = {_ch:{},_cnt:0,_pad:pad,_d:i};
+      // Tel alleen direct in deze map zittende bestanden mee voor de count, maar
+      // wel oplopend per map-niveau (zoals het oude gedrag deed).
+      node[deel]._cnt += (mapS[mp] ? mapS[mp].length : 0);
+      node = node[deel]._ch;
+    });
   });
   (function rn(node, parent) {
     Object.keys(node).sort().forEach(function(naam) {
@@ -2381,6 +2402,9 @@ async function vernieuwenData() {
     if (!newFiles) {
       var projData = await tcFetch('/projects/' + pid);
       newFiles = [];
+      // Reset folder-tracking voor verse fetch
+      allFolderPaths = new Set();
+      folderIdByPath = {};
       await tcGetItemsRecursive(projData.rootId, '', newFiles);
     }
     vulDocs(newFiles);
@@ -2925,7 +2949,10 @@ function renderT() {
     });
   });
   document.getElementById('ftr1').textContent = filtered.length + ' van ' + docs.length + ' documenten';
-  document.getElementById('ftr2').textContent = Object.keys(pm).length + ' mappen';
+  // Mappen-count: gebruik de werkelijke folder-set (incl. lege mappen), niet de groep-count
+  // (die was misleidend: 1 toonde bij "Geen groepering" terwijl er meer mappen waren).
+  var mappenCount = (allFolderPaths && allFolderPaths.size) ? allFolderPaths.size : Object.keys(mapS).length;
+  document.getElementById('ftr2').textContent = mappenCount + ' mappen';
 }
 
 function fmtDate(s) {
