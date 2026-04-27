@@ -2,7 +2,7 @@
 
 Open punten en ideeën voor volgende sessies. Geprioriteerd op impact.
 
-Laatst bijgewerkt: 2026-04-25.
+Laatst bijgewerkt: 2026-04-27.
 
 ---
 
@@ -12,6 +12,13 @@ Opgenomen in v3.2 (april 2026):
 - **Volledige metadata** via achtergrond-scan op per-bestand PSet endpoint (commit `999e71d`)
 - Voortgangs-indicator + verfijnde banner-tekst (commit `5c7edc5`)
 - 404-spam in browser-console weggewerkt via tc-proxy update (commit `e169834` + Cloudflare deploy)
+- **Projecten zonder PSet-schema** netjes ondersteund (commits `263bd18`, `cf05446`, `d843f20`, `c389a2e`):
+  - Filter/edit-UI verborgen + duidelijke uitleg-banner
+  - Hardcoded VW-fallback uitgezet (geen fictieve velden meer)
+  - Tabel toont alleen relevante technische kolommen
+  - Mappenboom toont nu álle mappen, ook lege/diepe paden
+  - Groeperen op mappenpad werkt direct
+  - Footer-count `X mappen` klopt met TC's eigen verkenner
 
 Opgenomen in v3.1 (april 2026):
 - Auto-aanvullen bij vrije-tekstvelden
