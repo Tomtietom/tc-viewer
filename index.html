@@ -607,6 +607,9 @@ let editMode=false, selectedDocs=new Set();
 var releases=[], releaseMap={}; // releaseMap: { fileId: ['Release naam',...] }
 var PROP_MAP = {};
 var _hasMetaSchema = true; // wordt na tcGetMetadata() gezet op basis van PROP_MAP-grootte
+// Helper: is dit een metadata-kolom? Alle metadata-keys hebben geen leading underscore
+// en zijn niet 'bestandsnaam' (de altijd-zichtbare technische kolom).
+function isMetaCol(key) { return !!key && key.charAt(0) !== '_' && key !== 'bestandsnaam'; }
 // Mapping van mappad → folder-ID uit TC, gevuld tijdens tcGetItemsRecursive.
 // Gebruikt om in navigateNaarMap() de juiste TC folder-URL te kunnen bouwen.
 var folderIdByPath = {};
@@ -705,6 +708,16 @@ function loadColConfig() {
 }
 function applyStandaardProfile() {
   visibleColKeys = new Set(DEFAULT_VISIBLE);
+  // Bij projecten zonder metadata-schema: filter metadata-kolommen weg uit standaard-set
+  if (_hasMetaSchema === false) {
+    var filtered = new Set();
+    visibleColKeys.forEach(function(k) { if (!isMetaCol(k)) filtered.add(k); });
+    filtered.add('bestandsnaam');
+    ['_versie', '_created'].forEach(function(k) {
+      if (ALL_COLS.some(function(c) { return c.k === k; })) filtered.add(k);
+    });
+    visibleColKeys = filtered;
+  }
   colOrder = DEFAULT_ORDER.slice();
   colWidths = {};
 }
@@ -1717,6 +1730,24 @@ function applyMetaSchemaUI() {
       mf.value = '';
     }
   }
+
+  // Tabelkolommen: bij geen schema alleen non-metadata kolommen zichtbaar.
+  // (Anders zien gebruikers headers als Doc.nr / Status / Bedrijf zonder data eronder.)
+  if (!hasSchema) {
+    var filtered = new Set();
+    visibleColKeys.forEach(function(k) { if (!isMetaCol(k)) filtered.add(k); });
+    filtered.add('bestandsnaam'); // altijd zichtbaar
+    // Voeg een paar zinnige technische kolommen toe als ze nog niet gekozen waren
+    ['_versie', '_created'].forEach(function(k) {
+      var inAll = ALL_COLS.some(function(c) { return c.k === k; });
+      if (inAll) filtered.add(k);
+    });
+    visibleColKeys = filtered;
+    try { COLS = getCols(); } catch(_) {}
+    try { bouwTH(); } catch(_) {}
+    try { renderColChecks(); } catch(_) {}
+    try { renderT(); } catch(_) {}
+  }
 }
 
 // ====================================================================
@@ -2482,6 +2513,10 @@ function renderColChecks() {
   var el = document.getElementById('colChecks');
   if (!el) return;
   var allCols = ALL_COLS.concat(customCols);
+  // Bij projecten zonder metadata-schema: alleen technische/non-metadata kolommen aanvinkbaar
+  if (_hasMetaSchema === false) {
+    allCols = allCols.filter(function(c) { return !isMetaCol(c.k); });
+  }
   // Sorteer op opgeslagen volgorde
   var orderMap = {};
   colOrder.forEach(function(k,i) { orderMap[k] = i; });
