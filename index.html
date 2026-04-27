@@ -1755,6 +1755,10 @@ function applyMetaSchemaUI() {
     try { renderColChecks(); } catch(_) {}
     try { renderT(); } catch(_) {}
   }
+
+  // Mappenboom (her)bouwen — zorgt dat 'ie zichtbaar is ook als toonDocs()
+  // de bouwBoom-tak heeft overgeslagen omdat tHead al children had.
+  try { bouwBoom(); } catch(_) {}
 }
 
 // ====================================================================
@@ -2137,7 +2141,9 @@ function toonDocs() {
     autoOpenSidebarSections();
     document.getElementById('searchBox').addEventListener('input', renderT);
   } else {
-    // Herrender bij terugnavigatie (metadata kan intussen geladen zijn)
+    // Herrender bij terugnavigatie (metadata + mappen kunnen intussen geladen zijn).
+    // Boom opnieuw bouwen zodat lege mappen / nieuw gevonden submappen ook verschijnen.
+    try { bouwBoom(); } catch(_) {}
     renderT();
   }
 }
