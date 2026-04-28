@@ -904,8 +904,8 @@ async function initTCExtension() {
     }, 15000);
     console.log('[TC] Verbonden met Workspace API', _fromCockpit ? '(uit cockpit)' : '');
 
-    // Project info
-    tcProject = await tcAPI.project.getCurrentProject();
+    // Project info — getProject is canoniek; getCurrentProject is deprecated
+    tcProject = await (tcAPI.project.getProject ? tcAPI.project.getProject() : tcAPI.project.getCurrentProject());
     console.log('[TC] Project:', JSON.stringify(tcProject));
     pid = tcProject.id || '';
     document.getElementById('hdrInfo').textContent = tcProject.name || '';
@@ -960,8 +960,20 @@ async function _ensureValidToken() {
         newToken = await Promise.race([tcAPI.extension.getAccessToken(), new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},5000);})]);
       }
       if (!newToken && tcAPI.extension.requestPermission) {
-        var result = await Promise.race([tcAPI.extension.requestPermission('accesstoken'), new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},5000);})]);
-        if (typeof result === 'string') newToken = result;
+        // Skill-spec: result kan 'pending' (wacht op consent) of 'denied' zijn — niet als token interpreteren.
+        var result = null;
+        for (var pollAttempt = 0; pollAttempt < 4; pollAttempt++) {
+          result = await Promise.race([tcAPI.extension.requestPermission('accesstoken'), new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},5000);})]);
+          var rs = (typeof result === 'string') ? result.toLowerCase() : (result && result.status || '').toLowerCase();
+          if (rs === 'denied') { console.warn('[TC] Permission denied tijdens token-refresh'); break; }
+          if (rs === 'pending' && pollAttempt < 3) {
+            console.log('[TC] Permission pending, poll ' + (pollAttempt+1) + '/3');
+            await new Promise(function(r){setTimeout(r, 2000);});
+            continue;
+          }
+          break;
+        }
+        if (typeof result === 'string' && result.length > 20) newToken = result;
         else if (result && result.token) newToken = result.token;
         else if (result && result.accessToken) newToken = result.accessToken;
       }
@@ -1007,6 +1019,54 @@ function _buildTcRequest(path, opts, base) {
   };
 }
 
+// Ringbuffer met laatste 10 fout-responses + support-headers (tc-request-id, X-Azure-Ref, x-amzn-RequestId).
+// Gebruik: Trimble support kan via deze IDs een specifieke call traceren.
+var _lastErrors = [];
+function _logTcError(url, r) {
+  try {
+    var ids = {};
+    var keys = ['tc-request-id', 'X-Azure-Ref', 'x-amzn-RequestId'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = r && r.headers && r.headers.get ? r.headers.get(keys[i]) : null;
+      if (v) ids[keys[i]] = v;
+    }
+    _lastErrors.push({ time: new Date().toISOString(), url: url, status: r ? r.status : 0, requestIds: ids });
+    if (_lastErrors.length > 10) _lastErrors.shift();
+  } catch(_) {}
+}
+
+// Exponential backoff bij 5xx (alleen idempotente methodes), Retry-After respect bij 429.
+// Max 3 pogingen voor GET/HEAD; non-idempotent methodes worden niet ge-retry'd.
+async function _doFetchWithRetry(doFetch, method) {
+  method = (method || 'GET').toUpperCase();
+  var idempotent = (method === 'GET' || method === 'HEAD' || method === 'OPTIONS');
+  var maxAttempts = idempotent ? 3 : 1;
+  var r = null;
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    r = await doFetch();
+    if (r.status >= 500 && r.status < 600 && idempotent && attempt < maxAttempts - 1) {
+      var delay = 500 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+      console.log('[TC] ' + r.status + ', retry ' + (attempt+1) + '/' + (maxAttempts-1) + ' over ' + delay + 'ms');
+      await new Promise(function(res){ setTimeout(res, delay); });
+      continue;
+    }
+    if (r.status === 429 && attempt < maxAttempts - 1) {
+      var ra = r.headers.get('Retry-After');
+      var waitMs = 1000;
+      if (ra) {
+        var n = parseInt(ra, 10);
+        if (!isNaN(n)) waitMs = n * 1000;
+        else { var d = Date.parse(ra); if (!isNaN(d)) waitMs = Math.max(0, d - Date.now()); }
+      }
+      console.log('[TC] 429 rate-limited, wacht ' + waitMs + 'ms');
+      await new Promise(function(res){ setTimeout(res, waitMs); });
+      continue;
+    }
+    break;
+  }
+  return r;
+}
+
 async function tcFetch(path, opts) {
   opts = opts || {};
   await _ensureValidToken();
@@ -1016,8 +1076,9 @@ async function tcFetch(path, opts) {
     var freshReq = _buildTcRequest(path, opts, TC_BASE);
     return fetchWithTimeout(freshReq.url, freshReq.init);
   };
-  var r = await doFetch();
-  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
+  var r = await _doFetchWithRetry(doFetch, opts.method);
+  if (r.status === 401) { await _ensureValidToken(); r = await _doFetchWithRetry(doFetch, opts.method); }
+  if (!r.ok) _logTcError(req.url, r);
   // Bij rawResponse: caller handelt status+body zelf af (voor gedetailleerde error messages)
   if (opts.rawResponse) return r;
   if (!r.ok) { console.warn('[TC] ' + r.status + ' voor ' + req.url); throw new Error(r.status + ' ' + r.statusText); }
@@ -1039,9 +1100,9 @@ async function tcFetchV21(path, opts) {
     var freshReq = _buildTcRequest(path, opts, v21Base);
     return fetchWithTimeout(freshReq.url, freshReq.init);
   };
-  var r = await doFetch();
-  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
-  if (!r.ok) { throw new Error(r.status + ' ' + r.statusText); }
+  var r = await _doFetchWithRetry(doFetch, opts.method);
+  if (r.status === 401) { await _ensureValidToken(); r = await _doFetchWithRetry(doFetch, opts.method); }
+  if (!r.ok) { _logTcError(v21Base + path, r); throw new Error(r.status + ' ' + r.statusText); }
   if (r.status === 204) return null;
   var txt = await r.text();
   if (!txt) return null;
@@ -1055,8 +1116,9 @@ async function tcFetchPSet(path, opts) {
     var freshReq = _buildTcRequest(path, opts, PSET_BASE);
     return fetchWithTimeout(freshReq.url, freshReq.init);
   };
-  var r = await doFetch();
-  if (r.status === 401) { await _ensureValidToken(); r = await doFetch(); }
+  var r = await _doFetchWithRetry(doFetch, opts.method);
+  if (r.status === 401) { await _ensureValidToken(); r = await _doFetchWithRetry(doFetch, opts.method); }
+  if (!r.ok) _logTcError(PSET_BASE + path, r);
   if (opts.rawResponse) return r;
   if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
   if (r.status === 204) return null;
@@ -1142,14 +1204,28 @@ async function tcAutoFetchData() {
     // === TOKEN OPHALEN (3-methode fallback) ===
     tcStep(1, 'loading', 'Verbinden met Trimble Connect...');
 
+    var _permDeniedSeen = false;
     if (!tcToken) {
-      // Methode 1: requestPermission
+      // Methode 1: requestPermission — skill-spec: result kan 'pending' of 'denied' zijn.
+      // Defensief: bij 'denied' niet vroeg returnen, fallback-methodes 2 en 3 mogen nog proberen.
+      // Pas als alles faalt gebruiken we _permDeniedSeen voor een specifiekere foutmelding.
       try {
         console.log('[TC] Probeer requestPermission...');
-        var tokenResult = await Promise.race([
-          tcAPI.extension.requestPermission('accesstoken'),
-          new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 5000); })
-        ]);
+        var tokenResult = null;
+        for (var pollAttempt = 0; pollAttempt < 4; pollAttempt++) {
+          tokenResult = await Promise.race([
+            tcAPI.extension.requestPermission('accesstoken'),
+            new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 5000); })
+          ]);
+          var rs = (typeof tokenResult === 'string') ? tokenResult.toLowerCase() : (tokenResult && tokenResult.status || '').toLowerCase();
+          if (rs === 'denied') { _permDeniedSeen = true; console.warn('[TC] Permission denied — fallback-methodes proberen'); break; }
+          if (rs === 'pending' && pollAttempt < 3) {
+            tcStep(1, 'loading', 'Wacht op toestemming gebruiker…');
+            await new Promise(function(r){setTimeout(r, 2000);});
+            continue;
+          }
+          break;
+        }
         if (typeof tokenResult === 'string' && tokenResult.length > 20) { tcToken = tokenResult; }
         else if (tokenResult && typeof tokenResult === 'object') { tcToken = tokenResult.token || tokenResult.accessToken || null; }
         console.log('[TC] requestPermission:', tcToken ? 'OK' : 'geen token');
@@ -1173,9 +1249,11 @@ async function tcAutoFetchData() {
     }
 
     if (!tcToken) {
-      tcStep(1, 'error', 'Geen access token ontvangen');
+      tcStep(1, 'error', _permDeniedSeen ? 'Toegang geweigerd' : 'Geen access token ontvangen');
       document.getElementById('tcError').style.display = '';
-      document.getElementById('tcError').textContent = 'Kan geen toegang krijgen tot het project. Probeer de extensie opnieuw te laden of controleer je rechten.';
+      document.getElementById('tcError').textContent = _permDeniedSeen
+        ? 'Je hebt toegang geweigerd. Herlaad de extensie (F5 in het paneel) en sta toegang toe wanneer Trimble Connect daarom vraagt.'
+        : 'Kan geen toegang krijgen tot het project. Probeer de extensie opnieuw te laden of controleer je rechten.';
       return;
     }
 
@@ -3434,6 +3512,11 @@ function kopieerDiagnose(btn) {
     tekst += 'UNMATCHED PSET INSTANCES (eerste ' + d.unmatched.length + ')\n';
     tekst += '-----------------------------------------\n';
     tekst += JSON.stringify(d.unmatched, null, 2) + '\n\n';
+  }
+  if (_lastErrors && _lastErrors.length) {
+    tekst += 'LAATSTE FOUTEN (max 10 — voor Trimble support)\n';
+    tekst += '----------------------------------------------\n';
+    tekst += JSON.stringify(_lastErrors, null, 2) + '\n\n';
   }
   tekst += 'VOORBEELD DOCS (eerste 3)\n';
   tekst += '-------------------------\n';
