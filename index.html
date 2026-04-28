@@ -1024,6 +1024,8 @@ function _buildTcRequest(path, opts, base) {
 var _lastErrors = [];
 function _logTcError(url, r) {
   try {
+    // Verwachte v2.1 -> v2.0 feature-detect fallback — niet loggen, dit is bedoeld gedrag
+    if (r && r.status === 400 && /\/tc\/api\/2\.1\/folders\//.test(url)) return;
     var ids = {};
     var keys = ['tc-request-id', 'X-Azure-Ref', 'x-amzn-RequestId'];
     for (var i = 0; i < keys.length; i++) {
