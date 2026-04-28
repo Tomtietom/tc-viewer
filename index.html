@@ -884,7 +884,7 @@ async function initTCExtension() {
         if (typeof data === 'string') token = data;
         else token = data.token || data.accessToken
           || (event === 'extension.accessToken' && typeof data.data === 'string' ? data.data : null);
-        if (token && token.length > 20) { tcToken = token; console.log('[TC] Token via event, lengte:', token.length); }
+        if (token && token.length > 20) { tcToken = token; _tcTokenExp = _parseTokenExp(token); console.log('[TC] Token via event, lengte:', token.length); }
       }
       // Cockpit-context: subMenu-klikken in zijbalk → navigeer naar de juiste extensie
       if (_fromCockpit && event === 'extension.command' && data && typeof data.data === 'string') {
@@ -995,7 +995,13 @@ function fetchWithTimeout(url, options, timeoutMs) {
   var id = setTimeout(function() { controller.abort(); }, timeoutMs);
   return fetch(url, Object.assign({}, options, { signal: controller.signal }))
     .catch(function(err) {
-      if (err.name === 'AbortError') throw new Error('Verbinding time-out (' + Math.round(timeoutMs/1000) + 's). Controleer je internetverbinding.');
+      // Log timeouts/netwerk-fouten naar de ringbuffer zodat ze in diagnose-rapport zichtbaar zijn.
+      // _logTcError accepteert {status, errorMessage} synthetic objecten.
+      if (err.name === 'AbortError') {
+        try { _logTcError(url, { status: 0, errorMessage: 'timeout-' + Math.round(timeoutMs/1000) + 's' }); } catch(_) {}
+        throw new Error('Verbinding time-out (' + Math.round(timeoutMs/1000) + 's). Controleer je internetverbinding.');
+      }
+      try { _logTcError(url, { status: 0, errorMessage: err.message || 'network-error' }); } catch(_) {}
       throw err;
     })
     .finally(function() { clearTimeout(id); });
@@ -1071,17 +1077,22 @@ function _logTcError(url, r) {
     // Verwachte v2.1 -> v2.0 feature-detect fallback — niet loggen, dit is bedoeld gedrag
     if (r && r.status === 400 && /\/tc\/api\/2\.1\/folders\//.test(url)) return;
     var ids = {};
-    var keys = ['tc-request-id', 'X-Azure-Ref', 'x-amzn-RequestId'];
-    for (var i = 0; i < keys.length; i++) {
-      var v = r && r.headers && r.headers.get ? r.headers.get(keys[i]) : null;
-      if (v) ids[keys[i]] = v;
+    if (r && r.headers && r.headers.get) {
+      var keys = ['tc-request-id', 'X-Azure-Ref', 'x-amzn-RequestId'];
+      for (var i = 0; i < keys.length; i++) {
+        var v = r.headers.get(keys[i]);
+        if (v) ids[keys[i]] = v;
+      }
     }
-    _lastErrors.push({ time: new Date().toISOString(), url: url, status: r ? r.status : 0, requestIds: ids });
+    var entry = { time: new Date().toISOString(), url: url, status: r ? r.status : 0, requestIds: ids };
+    if (r && r.errorMessage) entry.error = r.errorMessage; // synthetic timeout/network errors
+    _lastErrors.push(entry);
     if (_lastErrors.length > 10) _lastErrors.shift();
   } catch(_) {}
 }
 
-// Exponential backoff bij 5xx (alleen idempotente methodes), Retry-After respect bij 429.
+// Exponential backoff bij 5xx (alleen idempotente methodes), Retry-After respect bij 429,
+// en retry-bij-throw (timeout/network) voor idempotente calls.
 // Max 3 pogingen voor GET/HEAD; non-idempotent methodes worden niet ge-retry'd.
 async function _doFetchWithRetry(doFetch, method) {
   method = (method || 'GET').toUpperCase();
@@ -1089,7 +1100,18 @@ async function _doFetchWithRetry(doFetch, method) {
   var maxAttempts = idempotent ? 3 : 1;
   var r = null;
   for (var attempt = 0; attempt < maxAttempts; attempt++) {
-    r = await doFetch();
+    try {
+      r = await doFetch();
+    } catch(e) {
+      // Network/timeout error: retry voor idempotent, anders door-gooien
+      if (idempotent && attempt < maxAttempts - 1) {
+        var netDelay = 500 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
+        console.log('[TC] Network error, retry ' + (attempt+1) + '/' + (maxAttempts-1) + ' over ' + netDelay + 'ms:', e.message);
+        await new Promise(function(res){ setTimeout(res, netDelay); });
+        continue;
+      }
+      throw e;
+    }
     if (r.status >= 500 && r.status < 600 && idempotent && attempt < maxAttempts - 1) {
       var delay = 500 * Math.pow(2, attempt) + Math.floor(Math.random() * 200);
       console.log('[TC] ' + r.status + ', retry ' + (attempt+1) + '/' + (maxAttempts-1) + ' over ' + delay + 'ms');
