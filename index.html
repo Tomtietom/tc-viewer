@@ -1001,6 +1001,50 @@ function fetchWithTimeout(url, options, timeoutMs) {
     .finally(function() { clearTimeout(id); });
 }
 
+// Region discovery — haal de juiste base-URL op uit /regions ipv hardcoded.
+// Skill noemt hardcoded EU/US URLs als #1 integratie-fout. PSet API zit niet in /regions, blijft via PSET_REGIONS.
+// Pattern overgenomen uit atfielt-cockpit voor consistentie. SessionStorage-cache; bij failure: null → caller behoudt bestaande TC_BASE.
+async function _discoverRegionBase(projectLocation) {
+  var cacheKey = 'tc-viewer-regions';
+  var regions = null;
+  try {
+    var cached = sessionStorage.getItem(cacheKey);
+    if (cached) regions = JSON.parse(cached);
+  } catch(_) {}
+  if (!regions) {
+    try {
+      var r = await fetchWithTimeout('https://app.connect.trimble.com/tc/api/2.0/regions', {
+        headers: { 'Authorization': 'Bearer ' + tcToken, 'Accept': 'application/json' }
+      });
+      if (r.ok) {
+        regions = await r.json();
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(regions)); } catch(_) {}
+        console.log('[TC] Regions ontdekt:', Array.isArray(regions) ? regions.length : 0);
+      } else {
+        console.warn('[TC] /regions response:', r.status);
+      }
+    } catch(e) { console.warn('[TC] Region discovery netwerk-fout:', e.message); }
+  }
+  if (!Array.isArray(regions)) return null;
+  var loc = (projectLocation || 'europe').toLowerCase();
+  var locShort = loc.split(' ')[0];
+  var ALIASES = {
+    'europe': ['europe','eu','eur','eu-west','eu-1'],
+    'north america': ['north america','northamerica','na','us','us-east','us-1','america'],
+    'asia': ['asia','ap','as','ap-southeast','ap-1']
+  };
+  var targetAliases = ALIASES[loc] || [loc, locShort];
+  var region = regions.find(function(reg) {
+    var id = String(reg.id || reg.name || reg.location || '').toLowerCase();
+    return targetAliases.some(function(a) { return id === a || id.indexOf(a) >= 0; });
+  });
+  if (!region || !region.origin) { console.warn('[TC] Region match faalde voor location:', loc, '— gebruik fallback'); return null; }
+  var origin = String(region.origin).trim();
+  if (origin.indexOf('//') === 0) origin = 'https:' + origin;
+  else if (origin.indexOf('http://') !== 0 && origin.indexOf('https://') !== 0) origin = 'https://' + origin;
+  return origin + '/tc/api/2.0';
+}
+
 // === TC API CALLS ===
 // Opts (optioneel):
 //   method: 'GET'|'POST'|'DELETE'|'PUT' (default 'GET')
@@ -1261,6 +1305,16 @@ async function tcAutoFetchData() {
 
     console.log('[TC] Token OK, lengte:', tcToken.length);
     _tcTokenExp = _parseTokenExp(tcToken);
+
+    // Region discovery — overschrijf TC_BASE met dynamische resolve indien mogelijk.
+    // Hardcoded TC_API_REGIONS (regel 620) blijft de fallback voor offline/failure-scenario's.
+    try {
+      var dynamicBase = await _discoverRegionBase(tcProject.location);
+      if (dynamicBase) {
+        TC_BASE = dynamicBase;
+        console.log('[TC] Region via discovery:', tcProject.location, '→', TC_BASE);
+      }
+    } catch(e) { console.warn('[TC] Region discovery faalde, fallback naar hardcoded:', e.message); }
 
     // ╔══════════════════════════════════════════════════════════╗
     // ║  AT FIELT EXTENSION HUB — NIET VERWIJDEREN               ║
