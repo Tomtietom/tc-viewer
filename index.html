@@ -961,13 +961,14 @@ async function _ensureValidToken() {
       }
       if (!newToken && tcAPI.extension.requestPermission) {
         // Skill-spec: result kan 'pending' (wacht op consent) of 'denied' zijn — niet als token interpreteren.
+        // Max 2 attempts (1 initial + 1 retry) = ~12s worst-case, voorkomt te lange UI-block.
         var result = null;
-        for (var pollAttempt = 0; pollAttempt < 4; pollAttempt++) {
+        for (var pollAttempt = 0; pollAttempt < 2; pollAttempt++) {
           result = await Promise.race([tcAPI.extension.requestPermission('accesstoken'), new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},5000);})]);
           var rs = (typeof result === 'string') ? result.toLowerCase() : (result && result.status || '').toLowerCase();
           if (rs === 'denied') { console.warn('[TC] Permission denied tijdens token-refresh'); break; }
-          if (rs === 'pending' && pollAttempt < 3) {
-            console.log('[TC] Permission pending, poll ' + (pollAttempt+1) + '/3');
+          if (rs === 'pending' && pollAttempt < 1) {
+            console.log('[TC] Permission pending, poll 1/1');
             await new Promise(function(r){setTimeout(r, 2000);});
             continue;
           }
@@ -1072,6 +1073,8 @@ function _buildTcRequest(path, opts, base) {
 // Ringbuffer met laatste 10 fout-responses + support-headers (tc-request-id, X-Azure-Ref, x-amzn-RequestId).
 // Gebruik: Trimble support kan via deze IDs een specifieke call traceren.
 var _lastErrors = [];
+// 'discovery' = TC_BASE bepaald via /regions API; 'fallback' = hardcoded TC_API_REGIONS-tabel.
+var _regionStatus = 'fallback';
 function _logTcError(url, r) {
   try {
     // Verwachte v2.1 -> v2.0 feature-detect fallback — niet loggen, dit is bedoeld gedrag
@@ -1279,15 +1282,16 @@ async function tcAutoFetchData() {
       // Pas als alles faalt gebruiken we _permDeniedSeen voor een specifiekere foutmelding.
       try {
         console.log('[TC] Probeer requestPermission...');
+        // Max 2 attempts (1 initial + 1 retry) = ~12s worst-case, voorkomt te lange UI-block voordat fallback inkikt.
         var tokenResult = null;
-        for (var pollAttempt = 0; pollAttempt < 4; pollAttempt++) {
+        for (var pollAttempt = 0; pollAttempt < 2; pollAttempt++) {
           tokenResult = await Promise.race([
             tcAPI.extension.requestPermission('accesstoken'),
             new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 5000); })
           ]);
           var rs = (typeof tokenResult === 'string') ? tokenResult.toLowerCase() : (tokenResult && tokenResult.status || '').toLowerCase();
           if (rs === 'denied') { _permDeniedSeen = true; console.warn('[TC] Permission denied — fallback-methodes proberen'); break; }
-          if (rs === 'pending' && pollAttempt < 3) {
+          if (rs === 'pending' && pollAttempt < 1) {
             tcStep(1, 'loading', 'Wacht op toestemming gebruiker…');
             await new Promise(function(r){setTimeout(r, 2000);});
             continue;
@@ -1330,10 +1334,12 @@ async function tcAutoFetchData() {
 
     // Region discovery — overschrijf TC_BASE met dynamische resolve indien mogelijk.
     // Hardcoded TC_API_REGIONS (regel 620) blijft de fallback voor offline/failure-scenario's.
+    _regionStatus = 'fallback';
     try {
       var dynamicBase = await _discoverRegionBase(tcProject.location);
       if (dynamicBase) {
         TC_BASE = dynamicBase;
+        _regionStatus = 'discovery';
         console.log('[TC] Region via discovery:', tcProject.location, '→', TC_BASE);
       }
     } catch(e) { console.warn('[TC] Region discovery faalde, fallback naar hardcoded:', e.message); }
@@ -3557,7 +3563,10 @@ function kopieerDiagnose(btn) {
   tekst += 'Tijd: ' + new Date().toISOString() + '\n';
   tekst += 'Project: ' + (d.projectNaam || '?') + ' (id: ' + (d.projectId || '?') + ')\n';
   tekst += 'Extensie-versie: tomtietom.github.io/tc-viewer\n';
-  tekst += 'Browser: ' + navigator.userAgent + '\n\n';
+  tekst += 'Browser: ' + navigator.userAgent + '\n';
+  tekst += 'Region-base: ' + _regionStatus + ' (' + (TC_BASE || '?') + ')\n';
+  var tokenAge = (_tcTokenExp ? Math.round(_tcTokenExp - Date.now()/1000) : null);
+  tekst += 'Token geldig nog: ' + (tokenAge != null ? tokenAge + ' sec' : '?') + '\n\n';
   tekst += 'BESTANDEN & METADATA\n';
   tekst += '--------------------\n';
   tekst += 'Totaal bestanden: ' + docs.length + '\n';
