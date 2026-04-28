@@ -36,11 +36,11 @@ Opgenomen in v3.1 (april 2026):
 
 Geïdentificeerd na skill-pass (2026-04-28) tegen de officiële Trimble specs. Geen acuut defect; pak op zodra een aanleiding ontstaat.
 
-1. **`/regions` dynamische discovery** — Trimble-spec adviseert regio-base via `/regions`-endpoint i.p.v. hardcoded URLs. Huidige `TC_API_REGIONS` op regel 620 werkt al jaren stabiel; pas aanpassen als Trimble een regio toevoegt of een base-URL verandert. Implementatie: 1× per sessie call naar `https://app.connect.trimble.com/tc/api/2.0/regions`, met de huidige hardcoded tabel als fallback en cache.
-2. **HTTP 206 + `Content-Range` support** — canoniek paginatie-patroon volgens spec. PSet-endpoint negeert Range-headers nu (zie comment regel 1471), maar als Trimble dit aanpast: in `tcFetch` bij `r.status === 206` parse `Content-Range: items 0-99/2611` → return `{items, total}`. Caller kan dan op `total` stoppen i.p.v. cursor.
-3. **SRI-hash + lokale fallback voor workspace-api UMD** — bescherming tegen CDN-uitval. `<script src=…/index.js integrity="sha384-..." onerror="loadLocalFallback()">`. Pas relevant als CDN-storingen ooit issues geven.
-4. **Concurrency cap herzien bij 429-spikes** — `_DEEP_CONCURRENCY=10` is OK; bij echte rate-limit-pieken evt. dynamische scaling naar 5. Backoff-helper (toegevoegd 2026-04-28) vangt 429 al netjes op.
-5. **`tcAPI.project.getCurrentProject` fallback verwijderen** — defensieve fallback toegevoegd 2026-04-28 in regel 908. Verwijderen wanneer alle live TC-instances bevestigd zijn op `getProject`.
+1. **HTTP 206 + `Content-Range` support** — canoniek paginatie-patroon volgens spec. PSet-endpoint negeert Range-headers nu (zie comment regel 1471), maar als Trimble dit aanpast: in `tcFetch` bij `r.status === 206` parse `Content-Range: items 0-99/2611` → return `{items, total}`. Caller kan dan op `total` stoppen i.p.v. cursor.
+2. **SRI-hash + lokale fallback voor workspace-api UMD** — bescherming tegen CDN-uitval. `<script src=…/index.js integrity="sha384-..." onerror="loadLocalFallback()">`. Pas relevant als CDN-storingen ooit issues geven.
+3. **Concurrency cap herzien bij 429-spikes** — `_DEEP_CONCURRENCY=10` is OK; bij echte rate-limit-pieken evt. dynamische scaling naar 5. Backoff-helper (toegevoegd 2026-04-28) vangt 429 al netjes op.
+4. **`tcAPI.project.getCurrentProject` fallback verwijderen** — defensieve fallback toegevoegd 2026-04-28 in regel 908. Verwijderen wanneer alle live TC-instances bevestigd zijn op `getProject`.
+5. **PSet API region-discovery** — PSet zit niet in `/regions` response; `PSET_REGIONS` blijft hardcoded. Als Trimble ooit een `/regions`-equivalent voor PSet API publiceert, dan deze ook dynamisch maken.
 
 ---
 
