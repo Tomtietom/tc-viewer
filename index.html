@@ -1980,7 +1980,9 @@ var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
 
 function _psetDeepCacheKey(projId, vid) {
-  return 'psetDeep:' + projId + ':' + vid;
+  // V2: bumped 2026-04-29 — oude 'psetDeep:' entries cachen 404 voor files die wel PSet-data hebben
+  // (oude endpoint zonder /versions gaf valse 404's). Nieuwe prefix invalided alle stale entries.
+  return 'psetDeepV2:' + projId + ':' + vid;
 }
 // Returnt {props, status, age} of null. Caller bepaalt op basis van age of revalidatie nodig is.
 function _psetDeepCacheGet(projId, vid) {
@@ -2121,6 +2123,8 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
   }
 
   // Pool van N parallel — eenvoudige worker-loop
+  // Endpoint: /v1/psets/{frn}/{libId}/tcfiles/versions — returnt {items: [{props, schemaV, v, ...}, ...]}
+  // We pakken items[0] (TC's UI doet hetzelfde) als de actuele versie van de PSet-instance.
   var idx = 0;
   var sinceLastRender = 0;
   async function worker() {
@@ -2129,28 +2133,31 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
       var b = todo[myIdx];
       var vid = b._versionId || b._vid;
       var link = 'frn:tcfile:' + vid;
-      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles';
+      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles/versions';
       try {
         var resp = await tcFetchPSet(path, { rawResponse: true });
         if (resp.status === 200) {
           var txt = await resp.text();
-          var inst = txt ? JSON.parse(txt) : null;
-          if (inst && inst.found === false) {
-            // tc-proxy zet 404 om naar 200 met {found:false} om browser-console schoon te houden.
-            // Dezelfde semantiek als een echte 404: bestand heeft geen PSet.
+          var body = txt ? JSON.parse(txt) : null;
+          // tc-proxy fallback: 404 omgezet naar 200 {found:false}
+          if (body && body.found === false) {
             b._psetChecked = true;
             _psetDeepCacheSet(projectId, vid, { props: null, status: 404 });
             _deepScan.leeg++;
-          } else if (inst && inst.props) {
-            _applyPSetPropsToBestand(b, inst.props, inst.link || link);
-            _psetDeepCacheSet(projectId, vid, { props: inst.props, status: 200 });
-            _deepScan.succes++;
-            // canEdit afleiden uit _actions zoals bulk-loop
-            if (Array.isArray(inst._actions) && inst._actions.indexOf('pset:PutPSet') >= 0) b._canEdit = true;
           } else {
-            b._psetChecked = true;
-            _psetDeepCacheSet(projectId, vid, { props: null, status: 204 });
-            _deepScan.leeg++;
+            var items = body && Array.isArray(body.items) ? body.items : [];
+            var inst = items.length > 0 ? items[0] : null;
+            if (inst && inst.props) {
+              _applyPSetPropsToBestand(b, inst.props, inst.link || link);
+              _psetDeepCacheSet(projectId, vid, { props: inst.props, status: 200 });
+              _deepScan.succes++;
+              if (Array.isArray(inst._actions) && inst._actions.indexOf('pset:PutPSet') >= 0) b._canEdit = true;
+            } else {
+              // Geen items of geen props → bestand heeft geen PSet
+              b._psetChecked = true;
+              _psetDeepCacheSet(projectId, vid, { props: null, status: 204 });
+              _deepScan.leeg++;
+            }
           }
         } else if (resp.status === 404) {
           // Bestand heeft écht geen PSet — markeer en cache zodat we niet retryen
@@ -2267,13 +2274,19 @@ async function _revalidateInBackground(projectId, libId, files) {
       var vid = b._versionId || b._vid;
       if (!vid) continue;
       var link = 'frn:tcfile:' + vid;
-      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles';
+      // Endpoint /versions returnt {items: [...]}; pak items[0] voor de actuele versie
+      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles/versions';
       try {
         var resp = await tcFetchPSet(path, { rawResponse: true });
         if (resp.status === 200) {
           var txt = await resp.text();
-          var inst = txt ? JSON.parse(txt) : null;
-          var newProps = (inst && inst.found !== false && inst.props) ? inst.props : null;
+          var body = txt ? JSON.parse(txt) : null;
+          var inst = null;
+          if (body && body.found !== false) {
+            var items = Array.isArray(body.items) ? body.items : [];
+            inst = items.length > 0 ? items[0] : null;
+          }
+          var newProps = (inst && inst.props) ? inst.props : null;
           var hasChange = false;
           if (newProps) {
             for (var pid in newProps) {
