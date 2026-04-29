@@ -1013,10 +1013,16 @@ function fetchWithTimeout(url, options, timeoutMs) {
 // Pattern overgenomen uit atfielt-cockpit voor consistentie. SessionStorage-cache; bij failure: null → caller behoudt bestaande TC_BASE.
 async function _discoverRegionBase(projectLocation) {
   var cacheKey = 'tc-viewer-regions';
+  var REGIONS_TTL_MS = 24 * 60 * 60 * 1000; // 24u — regio's wijzigen amper
   var regions = null;
   try {
-    var cached = sessionStorage.getItem(cacheKey);
-    if (cached) regions = JSON.parse(cached);
+    var cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      var obj = JSON.parse(cached);
+      if (obj && typeof obj.ts === 'number' && (Date.now() - obj.ts) < REGIONS_TTL_MS && Array.isArray(obj.regions)) {
+        regions = obj.regions;
+      }
+    }
   } catch(_) {}
   if (!regions) {
     try {
@@ -1025,7 +1031,7 @@ async function _discoverRegionBase(projectLocation) {
       });
       if (r.ok) {
         regions = await r.json();
-        try { sessionStorage.setItem(cacheKey, JSON.stringify(regions)); } catch(_) {}
+        try { localStorage.setItem(cacheKey, JSON.stringify({ regions: regions, ts: Date.now() })); } catch(_) {}
         console.log('[TC] Regions ontdekt:', Array.isArray(regions) ? regions.length : 0);
       } else {
         console.warn('[TC] /regions response:', r.status);
@@ -1543,6 +1549,29 @@ async function tcGetItemsRecursive(folderId, pad, result) {
   }
 }
 
+// PSet schema cache (defs/tcfiles response): localStorage met 7d TTL.
+// Schema wijzigt zelden — meestal alleen bij project-config-update door beheerder.
+var _PSET_DEF_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+function _psetDefCacheKey(projectId) { return 'tc-viewer-psetdef:' + projectId; }
+function _psetDefCacheGet(projectId) {
+  try {
+    var raw = localStorage.getItem(_psetDefCacheKey(projectId));
+    if (!raw) return null;
+    var obj = JSON.parse(raw);
+    if (!obj || typeof obj.ts !== 'number') return null;
+    if ((Date.now() - obj.ts) > _PSET_DEF_TTL_MS) {
+      try { localStorage.removeItem(_psetDefCacheKey(projectId)); } catch(_) {}
+      return null;
+    }
+    return obj.def;
+  } catch(_) { return null; }
+}
+function _psetDefCacheSet(projectId, def) {
+  try {
+    localStorage.setItem(_psetDefCacheKey(projectId), JSON.stringify({ def: def, ts: Date.now() }));
+  } catch(_) { /* niet fataal — werkt zonder cache */ }
+}
+
 async function tcGetMetadata(projectId, bestanden) {
   var libId = 'tcproject:prod:' + projectId;
   console.log('[TC] PSet lib:', libId);
@@ -1564,7 +1593,14 @@ async function tcGetMetadata(projectId, bestanden) {
 
   var defResp = null;
   try {
-    defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+    // Cache (7d TTL): schema wijzigt zelden, bespaart een grote fetch per project-load
+    defResp = _psetDefCacheGet(projectId);
+    if (defResp) {
+      console.log('[TC] PSet definitie uit cache (7d TTL)');
+    } else {
+      defResp = await tcFetchPSet('/libs/' + encodeURIComponent(libId) + '/defs/tcfiles');
+      _psetDefCacheSet(projectId, defResp);
+    }
     var schema = defResp.schema || {};
     var schemaProps = schema.props || schema.properties || {};
     var propIds = Object.keys(schemaProps).filter(function(k) { return k.indexOf('-') > 0; }); // UUIDs bevatten streepjes
@@ -1932,38 +1968,61 @@ function applyMetaSchemaUI() {
 // We draaien dit op de achtergrond zodat de extensie direct bruikbaar is met de
 // initiële 100, en metadata gaandeweg invult voor de rest.
 //
-// Cache: sessionStorage psetDeep:{projId}:{vid} → { props, ts, status }
-// TTL: 30 min. 404's worden óók gecached om retry-storms te voorkomen.
+// Cache: localStorage psetDeep:{projId}:{vid} → { props, ts, status }
+// TTL: 24u hard expire. 404's worden óók gecached om retry-storms te voorkomen.
+// Stale-while-revalidate: < 2 min = vers (geen revalidate), 2 min - 24u = serve cache + achtergrond-refresh.
+// Cloudflare daily-limit aanleiding: 2026-04-28.
 
 var _deepScan = null; // { actief, totaal, gedaan, succes, leeg, fout, cacheHit, startTs }
-var _DEEP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuten
-var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls (lager = snellere updates, hoger = soepelere UI)
+var _DEEP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 uur — hard expire
+var _DEEP_CACHE_FRESH_MS = 2 * 60 * 1000;     // < 2 min = geen revalidate (echte besparing)
+var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
 
 function _psetDeepCacheKey(projId, vid) {
   return 'psetDeep:' + projId + ':' + vid;
 }
+// Returnt {props, status, age} of null. Caller bepaalt op basis van age of revalidatie nodig is.
 function _psetDeepCacheGet(projId, vid) {
   try {
-    var raw = sessionStorage.getItem(_psetDeepCacheKey(projId, vid));
+    var raw = localStorage.getItem(_psetDeepCacheKey(projId, vid));
     if (!raw) return null;
     var obj = JSON.parse(raw);
-    if (!obj || (Date.now() - obj.ts) > _DEEP_CACHE_TTL_MS) return null;
-    return obj;
+    if (!obj || typeof obj.ts !== 'number') return null;
+    var age = Date.now() - obj.ts;
+    if (age > _DEEP_CACHE_TTL_MS) {
+      try { localStorage.removeItem(_psetDeepCacheKey(projId, vid)); } catch(_) {}
+      return null;
+    }
+    return { props: obj.props, status: obj.status, age: age };
   } catch(_) { return null; }
 }
 function _psetDeepCacheSet(projId, vid, data) {
   try {
     if (data === null) {
-      sessionStorage.removeItem(_psetDeepCacheKey(projId, vid));
+      localStorage.removeItem(_psetDeepCacheKey(projId, vid));
     } else {
-      sessionStorage.setItem(_psetDeepCacheKey(projId, vid), JSON.stringify({
+      localStorage.setItem(_psetDeepCacheKey(projId, vid), JSON.stringify({
         props: data.props || null,
         status: data.status || 200,
         ts: Date.now()
       }));
     }
-  } catch(_) { /* sessionStorage vol of geblokkeerd — niet fataal */ }
+  } catch(e) {
+    // Quota-error: leeg eigen cache voor dit project en probeer opnieuw
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+      try {
+        var prefix = 'psetDeep:' + projId + ':';
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf(prefix) === 0) localStorage.removeItem(k);
+        }
+        if (data) localStorage.setItem(_psetDeepCacheKey(projId, vid), JSON.stringify({
+          props: data.props || null, status: data.status || 200, ts: Date.now()
+        }));
+      } catch(_) { /* opgeven, niet fataal */ }
+    }
+  }
 }
 
 // Pas één PSet-instance toe op een bestand: schrijf veldwaarden via PROP_MAP
@@ -1996,9 +2055,14 @@ function updateDeepScanUI() {
 }
 
 async function tcGetMetadataDeep(projectId, libId, bestanden) {
-  // Filter: alleen bestanden zonder PSet-match én niet al via cache afgehandeld
+  // Filter: alleen bestanden zonder PSet-match én niet al via bulk afgehandeld.
+  // SWR: cache < 2 min wordt zonder revalidatie gebruikt (echte besparing).
+  // Cache 2 min - 24h: data direct toegepast voor instant UI, ALSNOG opnieuw gefetcht
+  // op de achtergrond zodat collega-wijzigingen binnen ~30s zichtbaar worden.
   var todo = [];
+  var revalidateTodo = [];
   var cacheHits = 0;
+  var staleHits = 0;
   for (var i = 0; i < bestanden.length; i++) {
     var b = bestanden[i];
     if (b._matchedFromInstance) continue; // bulk-call had 'm al
@@ -2012,6 +2076,11 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
       } else {
         b._psetChecked = true;
       }
+      // Stale → ook revalideren op achtergrond, zonder UI te blokkeren
+      if (cached.age >= _DEEP_CACHE_FRESH_MS) {
+        revalidateTodo.push(b);
+        staleHits++;
+      }
       continue;
     }
     todo.push(b);
@@ -2021,7 +2090,7 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
     console.log('[TC] Deep-scan: niets te doen (alle bestanden via bulk gematcht)');
     return;
   }
-  console.log('[TC] Deep-scan start: ' + todo.length + ' bestanden, ' + cacheHits + ' cache-hits');
+  console.log('[TC] Deep-scan start: ' + todo.length + ' bestanden, ' + cacheHits + ' cache-hits (' + staleHits + ' stale → revalidatie)');
 
   _deepScan = {
     actief: todo.length > 0,
@@ -2048,6 +2117,8 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
   if (todo.length === 0) {
     _deepScan.actief = false;
     updateDeepScanUI();
+    // Stale entries alsnog op achtergrond revalideren — UI is al instant uit cache opgebouwd
+    if (revalidateTodo.length > 0) _revalidateInBackground(projectId, libId, revalidateTodo);
     return;
   }
 
@@ -2170,6 +2241,79 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
     ind.textContent = '\u26A0 Scan deels mislukt (' + _deepScan.fout + ' fouten) — zie Diagnose';
     ind.style.background = '#fdecea';
     ind.style.color = '#a63232';
+  }
+
+  // SWR: stale entries alsnog op achtergrond revalideren — UI is al opgebouwd, geen blokkade
+  if (revalidateTodo.length > 0) _revalidateInBackground(projectId, libId, revalidateTodo);
+}
+
+// SWR-revalidatie op achtergrond: per-file fetch, vergelijk met cache, update UI bij verschil.
+// Niet-blokkerend — UI is al opgebouwd uit cache. Geeft collega-wijzigingen kans om binnen ~30s zichtbaar te worden.
+async function _revalidateInBackground(projectId, libId, files) {
+  if (!files || files.length === 0) return;
+  console.log('[TC] Revalidatie start: ' + files.length + ' stale entries');
+  var ind = document.getElementById('deepScanIndicator');
+  if (ind) {
+    ind.style.display = 'inline-flex';
+    ind.classList.remove('scanning');
+    ind.textContent = 'Actualisatie loopt...';
+    ind.style.background = '#fff8e1';
+    ind.style.color = '#7a5a00';
+  }
+  var idx = 0;
+  var changed = 0;
+  var concurrency = Math.min(5, files.length); // bewust lager dan hoofd-scan
+  async function rv() {
+    while (idx < files.length) {
+      var b = files[idx++];
+      var vid = b._versionId || b._vid;
+      if (!vid) continue;
+      var link = 'frn:tcfile:' + vid;
+      var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles';
+      try {
+        var resp = await tcFetchPSet(path, { rawResponse: true });
+        if (resp.status === 200) {
+          var txt = await resp.text();
+          var inst = txt ? JSON.parse(txt) : null;
+          var newProps = (inst && inst.found !== false && inst.props) ? inst.props : null;
+          var hasChange = false;
+          if (newProps) {
+            for (var pid in newProps) {
+              var veld = PROP_MAP[pid];
+              if (!veld) continue;
+              var nieuw = String(newProps[pid] || '').trim();
+              if (nieuw === '--') continue;
+              var huidig = String(b[veld] || '').trim();
+              if (nieuw !== huidig) { hasChange = true; break; }
+            }
+          }
+          if (hasChange) {
+            _applyPSetPropsToBestand(b, newProps, link);
+            _psetDeepCacheSet(projectId, vid, { props: newProps, status: 200 });
+            changed++;
+          } else if (newProps) {
+            _psetDeepCacheSet(projectId, vid, { props: newProps, status: 200 });
+          } else {
+            _psetDeepCacheSet(projectId, vid, { props: null, status: 404 });
+          }
+        } else if (resp.status === 404) {
+          _psetDeepCacheSet(projectId, vid, { props: null, status: 404 });
+        }
+      } catch(_) { /* niet-fataal */ }
+    }
+  }
+  var workers = [];
+  for (var w = 0; w < concurrency; w++) workers.push(rv());
+  await Promise.all(workers);
+  console.log('[TC] Revalidatie klaar — ' + changed + ' wijzigingen ontdekt');
+  if (changed > 0) { try { renderT(); } catch(_) {} }
+  if (ind) {
+    ind.textContent = changed > 0 ? ('Bijgewerkt: ' + changed) : 'Actueel';
+    ind.style.background = '#e7f4ec';
+    ind.style.color = '#2d6a4f';
+    setTimeout(function() {
+      if (ind) { ind.style.display = 'none'; ind.style.background = ''; ind.style.color = ''; }
+    }, 3000);
   }
 }
 
