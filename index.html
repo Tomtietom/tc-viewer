@@ -1984,6 +1984,21 @@ function _psetDeepCacheKey(projId, vid) {
   // alle 82 release-files in 00167 stonden ten onrechte als 404 in cache. Nieuwe prefix invalided alles.
   return 'psetDeepV3:' + projId + ':' + vid;
 }
+// Eenmalige cleanup van permanent-stale cache-entries uit oudere versies.
+// V1 (`psetDeep:`) cachte 404's voor /tcfiles endpoint zonder /versions suffix.
+// V2 (`psetDeepV2:`) cachte 404's onder versionId-keys ipv vid.
+// Beide bevatten geen bruikbare data meer. Opruimen scheelt localStorage-ruimte.
+(function _cleanupOldPsetCaches() {
+  try {
+    for (var i = localStorage.length - 1; i >= 0; i--) {
+      var k = localStorage.key(i);
+      if (!k) continue;
+      if (k.indexOf('psetDeep:') === 0 || k.indexOf('psetDeepV2:') === 0) {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch(_) { /* niet fataal */ }
+})();
 // Returnt {props, status, age} of null. Caller bepaalt op basis van age of revalidatie nodig is.
 function _psetDeepCacheGet(projId, vid) {
   try {
@@ -3290,8 +3305,8 @@ function renderT() {
         // Normal mode
         else if (c.k==='bestandsnaam' && pid && doc._vid) {
           var a = document.createElement('a');
-          a.href = tcFileUrl(doc._vid, doc.bestandsnaam);
-          a.target='_blank'; a.textContent=v; a.title='Open in TC (laatste versie)';
+          a.href = tcFileUrl(doc._vid, doc.bestandsnaam, doc.file_location);
+          a.target='_blank'; a.textContent=v; a.title='Open in TC — map met dit bestand';
           a.onclick = function(e) { e.stopPropagation(); };
           td.appendChild(a);
         } else if (c.k==='document_status' && v) { td.innerHTML = sBdg(v); }
@@ -3315,10 +3330,16 @@ function fmtDate(s) {
 }
 
 var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
-function tcFileUrl(vid, naam) {
-  var ext = (naam || '').split('.').pop().toLowerCase();
-  if (EXT_3D.indexOf(ext) >= 0) return 'https://web.connect.trimble.com/projects/'+pid+'/detailviewer?fileId='+vid+'&versionId=';
-  return 'https://web.connect.trimble.com/projects/'+pid+'/viewer/2D?id='+vid+'&version=';
+// Bouw een TC-URL voor een bestand. Voorkeur: open de map waarin het bestand staat
+// (gebruiker krijgt folder-context, kan andere bestanden zien). Fallback: TC's
+// generieke file-page die zelf naar de juiste folder navigeert.
+// Voorheen werd /viewer/2D?id=X&version= of /detailviewer?fileId=X&versionId= gebruikt,
+// maar de lege version-param zorgde voor lege tabbladen — verwijderd 2026-04-29.
+function tcFileUrl(vid, naam, fileLocation) {
+  if (!pid || !vid) return '#';
+  var folderUrl = fileLocation ? folderUrlForPath(fileLocation) : null;
+  if (folderUrl) return folderUrl;
+  return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(vid);
 }
 
 function sBdg(s) {
@@ -3370,7 +3391,7 @@ function toonDetail(doc) {
       html += '<div class="no-prev">Geen preview beschikbaar voor .' + ext + '</div>';
     }
     html += '</div></div>';
-    html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
+    html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam, doc.file_location)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
     // Versies-sectie (alleen als meer dan 1 versie, async geladen)
     html += '<div class="dp-sec dp-versions" id="dpVersionsSec" style="display:none"><h4>Versies</h4><div id="dpVersions"></div></div>';
   }
@@ -3510,7 +3531,7 @@ function toonReleaseDetail(relId) {
     var mod = f.modifiedOn ? fmtDate(f.modifiedOn) : '';
     html += '<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:8px 12px">';
     if (pid && f.id) {
-      html += '<a href="' + tcFileUrl(f.id, naam) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
+      html += '<a href="' + tcFileUrl(f.id, naam, doc && doc.file_location) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
     } else { html += naam; }
     html += '</td><td style="padding:8px">' + rev + '</td><td style="padding:8px;color:#888">' + mod + '</td>';
     html += '<td style="padding:8px;text-align:center"><button onclick="removeFromRelease(\'' + rel.id + '\',\'' + (f.id||'') + '\',\'' + naam.replace(/'/g,"\\'") + '\')" style="background:none;border:1px solid #ddd;border-radius:4px;cursor:pointer;color:#c00;font-size:14px;padding:2px 6px" title="Verwijder uit release">&times;</button></td></tr>';
