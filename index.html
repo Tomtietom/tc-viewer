@@ -314,13 +314,13 @@ td a:hover{color:var(--af);text-decoration:underline}
 
 /* Updates-banner (nieuwe/gewijzigde docs gedetecteerd) */
 .updates-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#fff8e1;border-bottom:1px solid #f0dcc8;font-size:var(--fs-sm);color:var(--g6)}
-.meta-warn-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#fde8e8;border-bottom:1px solid #f5c0c0;font-size:var(--fs-sm);color:#8a3a3a}
-.meta-warn-banner .mw-icon{font-size:14px}
+.meta-warn-banner{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4);background:#eef3f8;border-bottom:1px solid #d4dce8;font-size:var(--fs-sm);color:#365a82}
+.meta-warn-banner .mw-icon{font-size:14px;color:#365a82}
 .meta-warn-banner .mw-text{flex:1;font-weight:500}
-.meta-warn-banner .mw-btn{padding:4px var(--s3);border:1px solid var(--warn);border-radius:var(--r-sm);background:#fff;color:var(--warn);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
-.meta-warn-banner .mw-btn:hover{background:var(--warn);color:#fff}
-.meta-warn-banner .mw-close{cursor:pointer;font-size:16px;color:#8a3a3a;padding:0 var(--s1);user-select:none}
-.meta-warn-banner .mw-close:hover{color:var(--warn)}
+.meta-warn-banner .mw-btn{padding:4px var(--s3);border:1px solid #365a82;border-radius:var(--r-sm);background:#fff;color:#365a82;cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
+.meta-warn-banner .mw-btn:hover{background:#365a82;color:#fff}
+.meta-warn-banner .mw-close{cursor:pointer;font-size:16px;color:#365a82;padding:0 var(--s1);user-select:none}
+.meta-warn-banner .mw-close:hover{color:#1a3654}
 .updates-banner .ub-icon{font-size:14px}
 .updates-banner .ub-text{flex:1;font-weight:500}
 .updates-banner .ub-btn{padding:4px var(--s3);border:1px solid var(--hl);border-radius:var(--r-sm);background:#fff;color:var(--g5);cursor:pointer;font-family:'Poppins',sans-serif;font-size:var(--fs-xs);transition:all .15s}
@@ -474,7 +474,7 @@ td a:hover{color:var(--af);text-decoration:underline}
   </div>
   <div class="main">
     <div id="metaWarnBanner" class="meta-warn-banner" style="display:none">
-      <span class="mw-icon">&#9888;</span>
+      <span class="mw-icon">&#9432;</span>
       <span class="mw-text" id="metaWarnText"></span>
       <button class="mw-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport voor support">&#9432; Diagnose kopi&euml;ren</button>
       <span class="mw-close" onclick="document.getElementById('metaWarnBanner').style.display='none'" title="Verbergen">&times;</span>
@@ -498,7 +498,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500;transition:background 0.3s,color 0.3s" title="Metadata wordt op de achtergrond aangevuld voor bestanden die niet in de eerste batch zaten"></span><button class="diag-btn" onclick="checkForUpdates()" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500;transition:background 0.3s,color 0.3s" title="Metadata wordt op de achtergrond aangevuld voor bestanden die niet in de eerste batch zaten"></span><button class="diag-btn" onclick="vernieuwClicked(this)" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -2038,20 +2038,18 @@ function _applyPSetPropsToBestand(b, props, link) {
   }
 }
 
-// UI-update voor de scan-indicator rechts onderin
+// Footer-indicator: blijft verborgen tijdens hoofd-scan (de banner bovenin toont al de voortgang).
+// Wordt alleen ingezet door _revalidateInBackground en de ✓-feedback aan het einde van de scan.
 function updateDeepScanUI() {
   var ind = document.getElementById('deepScanIndicator');
   if (!ind) return;
   if (!_deepScan || !_deepScan.actief) {
     ind.classList.remove('scanning');
-    ind.style.display = 'none';
+    // Niet automatisch verbergen — caller (✓-feedback of revalidatie) bepaalt dat zelf
     return;
   }
-  var done = _deepScan.gedaan, totaal = _deepScan.totaal;
-  var pct = totaal > 0 ? Math.round(done / totaal * 100) : 0;
-  ind.style.display = 'inline-flex';
-  ind.classList.add('scanning');
-  ind.textContent = 'Metadata laden — ' + done + ' van ' + totaal + ' (' + pct + '%)';
+  // Tijdens scan: indicator blijft verborgen — duplicaat van banner-tekst voorkomen
+  ind.style.display = 'none';
 }
 
 async function tcGetMetadataDeep(projectId, libId, bestanden) {
@@ -2635,6 +2633,31 @@ function setupAutoRefresh() {
       if (document.visibilityState === 'visible') checkForUpdates();
     };
     document.addEventListener('visibilitychange', window._autoRefreshVisHandler);
+  }
+}
+
+// Wrapper rond checkForUpdates die de footer-knop visuele feedback geeft.
+// Anders lijkt de knop niets te doen wanneer er geen nieuwe documenten zijn.
+async function vernieuwClicked(btn) {
+  if (!btn) return;
+  var origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '&#8635; Bezig...';
+  try {
+    await checkForUpdates();
+  } catch(_) {}
+  // Als de updates-banner verscheen, dan toonde checkForUpdates al feedback. Anders: korte ✓-melding.
+  var banner = document.getElementById('updatesBanner');
+  var bannerVisible = banner && banner.style.display !== 'none' && banner.style.display !== '';
+  if (bannerVisible) {
+    btn.innerHTML = origText;
+    btn.disabled = false;
+  } else {
+    btn.innerHTML = '&#10003; Geen nieuwe documenten';
+    setTimeout(function() {
+      btn.innerHTML = origText;
+      btn.disabled = false;
+    }, 2500);
   }
 }
 
