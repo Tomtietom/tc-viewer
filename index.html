@@ -1980,9 +1980,9 @@ var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
 
 function _psetDeepCacheKey(projId, vid) {
-  // V2: bumped 2026-04-29 — oude 'psetDeep:' entries cachen 404 voor files die wel PSet-data hebben
-  // (oude endpoint zonder /versions gaf valse 404's). Nieuwe prefix invalided alle stale entries.
-  return 'psetDeepV2:' + projId + ':' + vid;
+  // V3: bumped 2026-04-29 — V2 entries cachen 404 onder versionId (verkeerde key) ipv vid;
+  // alle 82 release-files in 00167 stonden ten onrechte als 404 in cache. Nieuwe prefix invalided alles.
+  return 'psetDeepV3:' + projId + ':' + vid;
 }
 // Returnt {props, status, age} of null. Caller bepaalt op basis van age of revalidatie nodig is.
 function _psetDeepCacheGet(projId, vid) {
@@ -2011,10 +2011,13 @@ function _psetDeepCacheSet(projId, vid, data) {
       }));
     }
   } catch(e) {
-    // Quota-error: leeg eigen cache voor dit project en probeer opnieuw
+    // Quota-error: leeg eigen cache voor dit project en probeer opnieuw.
+    // Cleanup gebruikt de huidige cache-key prefix dynamisch zodat hij meegroeit met V-bumps.
     if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
       try {
-        var prefix = 'psetDeep:' + projId + ':';
+        // Haal de prefix uit de helper zelf: alles vóór ':{vid}' is de prefix
+        var sampleKey = _psetDeepCacheKey(projId, '___SENTINEL___');
+        var prefix = sampleKey.replace(':___SENTINEL___', ':');
         for (var i = localStorage.length - 1; i >= 0; i--) {
           var k = localStorage.key(i);
           if (k && k.indexOf(prefix) === 0) localStorage.removeItem(k);
@@ -2066,7 +2069,10 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
   for (var i = 0; i < bestanden.length; i++) {
     var b = bestanden[i];
     if (b._matchedFromInstance) continue; // bulk-call had 'm al
-    var vid = b._versionId || b._vid;
+    // PSet API verwacht het file-ID (_vid), NIET het versionId. Bug-fix 2026-04-29:
+    // eerder gebruikten we _versionId || _vid wat fout was — TC accepteerde geen versionId
+    // als FRN-link en gaf voor 58/84 release-files (waar _versionId !== _vid) een 404.
+    var vid = b._vid;
     if (!vid) continue;
     var cached = _psetDeepCacheGet(projectId, vid);
     if (cached) {
@@ -2131,7 +2137,7 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
     while (idx < todo.length) {
       var myIdx = idx++;
       var b = todo[myIdx];
-      var vid = b._versionId || b._vid;
+      var vid = b._vid; // file-ID; PSet API geeft 404 op versionId
       var link = 'frn:tcfile:' + vid;
       var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles/versions';
       try {
@@ -2271,7 +2277,7 @@ async function _revalidateInBackground(projectId, libId, files) {
   async function rv() {
     while (idx < files.length) {
       var b = files[idx++];
-      var vid = b._versionId || b._vid;
+      var vid = b._vid; // file-ID, niet versionId — zie bug-fix 2026-04-29
       if (!vid) continue;
       var link = 'frn:tcfile:' + vid;
       // Endpoint /versions returnt {items: [...]}; pak items[0] voor de actuele versie
@@ -4126,7 +4132,7 @@ async function bulkSave() {
           console.warn('[TC] Item geweigerd:', doc.bestandsnaam, item.error || item.errorMessage);
         } else {
           doc[field] = value;
-          try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
+          try { _psetDeepCacheSet(pid, doc._vid, null); } catch(_) {}
           saved++;
         }
       });
@@ -4137,7 +4143,7 @@ async function bulkSave() {
       // Geen detail per item, neem aan dat alles oké is (HTTP 200/201)
       toSave.forEach(function(doc) {
         doc[field] = value;
-        try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
+        try { _psetDeepCacheSet(pid, doc._vid, null); } catch(_) {}
       });
       saved = toSave.length;
     }
@@ -4202,7 +4208,7 @@ async function saveCell(doc, field, value, el) {
     // Pas NA succesvolle bevestiging de lokale state aanpassen
     doc[field] = value;
     // Cache invalideren — opnieuw ophalen zorgt dat we niet vastzitten op stale waarden
-    try { _psetDeepCacheSet(pid, doc._versionId || doc._vid, null); } catch(_) {}
+    try { _psetDeepCacheSet(pid, doc._vid, null); } catch(_) {}
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
     // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
     try { addDatalistValue(field, value); } catch(_) {}
