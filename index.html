@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-04-30T14:45">
+<meta name="build" content="2026-04-30T15:15">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -3495,13 +3495,12 @@ async function laadPreview(vid, naam, ext, imgExts) {
     if (!resp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
     var blob = await resp.blob();
     if (ext === 'pdf') {
-      // TC's downloadurl levert vaak application/octet-stream → browser downloadt i.p.v. preview.
-      // Forceer application/pdf zodat de blob inline rendert in iframe en in nieuw tabblad.
+      // Inline iframe-preview kan niet: Chrome blokkeert blob:-URL's in een geneste
+      // iframe (extensie zit al in TC's iframe). MIME forceren naar application/pdf
+      // zodat de browser het in een nieuw tabblad als preview opent ipv downloadt.
       var pdfBlob = (blob.type === 'application/pdf') ? blob : new Blob([blob], { type: 'application/pdf' });
       var pdfUrl = URL.createObjectURL(pdfBlob);
-      el.innerHTML =
-        '<iframe src="' + esc(pdfUrl) + '" style="width:100%;height:420px;border:1px solid #e8e0d8;border-radius:6px;background:#fff" title="' + esc(naam) + '"></iframe>' +
-        '<a href="' + esc(pdfUrl) + '" target="_blank" style="display:block;margin-top:8px;padding:10px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:12px;text-decoration:none">&#128196; PDF in nieuw tabblad openen</a>';
+      el.innerHTML = '<a href="' + esc(pdfUrl) + '" target="_blank" style="display:block;padding:20px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:13px;text-decoration:none">&#128196; PDF openen</a>';
     } else {
       var objUrl = URL.createObjectURL(blob);
       el.innerHTML = '<img src="' + esc(objUrl) + '" alt="' + esc(naam) + '">';
