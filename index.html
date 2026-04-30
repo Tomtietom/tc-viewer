@@ -2477,7 +2477,11 @@ function toonDocs() {
     } catch(e) {}
     vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
     autoOpenSidebarSections();
-    document.getElementById('searchBox').addEventListener('input', renderT);
+    var _searchTimer = null;
+    document.getElementById('searchBox').addEventListener('input', function() {
+      if (_searchTimer) clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(renderT, 150);
+    });
   } else {
     // Herrender bij terugnavigatie (metadata + mappen kunnen intussen geladen zijn).
     // Boom opnieuw bouwen zodat lege mappen / nieuw gevonden submappen ook verschijnen.
@@ -3167,6 +3171,8 @@ function filt() {
     _updatesSnapshot.toegevoegd.forEach(function(v) { updatesVids[v] = 1; });
     _updatesSnapshot.gewijzigd.forEach(function(v) { updatesVids[v] = 1; });
   }
+  // Cache de kolomdefinities en zoekkolomsleutels één keer (was: per document opnieuw aangeroepen).
+  var _zoekKeys = z ? getCols().map(function(c) { return c.k; }) : null;
   var d = docs.filter(function(d) {
     if (useUpdatesFilter && !updatesVids[d._vid]) return false;
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
@@ -3191,7 +3197,12 @@ function filt() {
       var d7 = new Date(); d7.setDate(d7.getDate() - 7);
       if (!d._created || new Date(d._created) < d7) return false;
     }
-    if (z) { var parts = []; getCols().forEach(function(c) { parts.push(docVal(d, c.k)); }); parts.push(d.file_location||''); var t = parts.join(' ').toLowerCase(); if (t.indexOf(z)===-1) return false; }
+    if (z) {
+      var parts = [];
+      for (var zi = 0; zi < _zoekKeys.length; zi++) parts.push(docVal(d, _zoekKeys[zi]));
+      parts.push(d.file_location || '');
+      if (parts.join(' ').toLowerCase().indexOf(z) === -1) return false;
+    }
     return true;
   });
   if (sortK) d.sort(function(a,b) {
@@ -3305,8 +3316,8 @@ function renderT() {
         // Normal mode
         else if (c.k==='bestandsnaam' && pid && doc._vid) {
           var a = document.createElement('a');
-          a.href = tcFileUrl(doc._vid, doc.bestandsnaam, doc.file_location);
-          a.target='_blank'; a.textContent=v; a.title='Open in TC — map met dit bestand';
+          a.href = tcFileUrl(doc._vid, doc._versionId, doc.bestandsnaam, doc.file_location);
+          a.target='_blank'; a.textContent=v; a.title='Open in Trimble Connect — laatste versie';
           a.onclick = function(e) { e.stopPropagation(); };
           td.appendChild(a);
         } else if (c.k==='document_status' && v) { td.innerHTML = sBdg(v); }
@@ -3330,13 +3341,25 @@ function fmtDate(s) {
 }
 
 var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
-// Bouw een TC-URL voor een bestand. Voorkeur: open de map waarin het bestand staat
-// (gebruiker krijgt folder-context, kan andere bestanden zien). Fallback: TC's
-// generieke file-page die zelf naar de juiste folder navigeert.
-// Voorheen werd /viewer/2D?id=X&version= of /detailviewer?fileId=X&versionId= gebruikt,
-// maar de lege version-param zorgde voor lege tabbladen — verwijderd 2026-04-29.
-function tcFileUrl(vid, naam, fileLocation) {
+// Bouw een TC-URL voor een bestand. Kiest het juiste viewer-endpoint op basis van extensie:
+//   - 3D-bestand → /detailviewer?fileId=X&versionId=Y (3D viewer)
+//   - 2D/PDF/anders → /viewer/2D?id=X&version=Y (2D/PDF viewer)
+// versionId is essentieel: zonder gevulde version-param toont TC een leeg tabblad.
+// Fallback (geen versionId beschikbaar): folder-URL met file-context.
+function tcFileUrl(vid, versionId, naam, fileLocation) {
   if (!pid || !vid) return '#';
+  var ext = (naam || '').split('.').pop().toLowerCase();
+  var ver = versionId || vid;
+  if (ver) {
+    if (EXT_3D.indexOf(ext) >= 0) {
+      return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
+             '/detailviewer?fileId=' + encodeURIComponent(vid) +
+             '&versionId=' + encodeURIComponent(ver);
+    }
+    return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
+           '/viewer/2D?id=' + encodeURIComponent(vid) +
+           '&version=' + encodeURIComponent(ver);
+  }
   var folderUrl = fileLocation ? folderUrlForPath(fileLocation) : null;
   if (folderUrl) return folderUrl;
   return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(vid);
@@ -3391,7 +3414,7 @@ function toonDetail(doc) {
       html += '<div class="no-prev">Geen preview beschikbaar voor .' + ext + '</div>';
     }
     html += '</div></div>';
-    html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc.bestandsnaam, doc.file_location)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
+    html += '<a class="dp-tc" href="'+tcFileUrl(doc._vid, doc._versionId, doc.bestandsnaam, doc.file_location)+'" target="_blank">Open in Trimble Connect &#8599;</a>';
     // Versies-sectie (alleen als meer dan 1 versie, async geladen)
     html += '<div class="dp-sec dp-versions" id="dpVersionsSec" style="display:none"><h4>Versies</h4><div id="dpVersions"></div></div>';
   }
@@ -3455,10 +3478,16 @@ async function laadPreview(vid, naam, ext, imgExts) {
     var resp = await fetch(dlData.url);
     if (!resp.ok) { el.innerHTML = '<div class="no-prev">Preview laden mislukt</div>'; return; }
     var blob = await resp.blob();
-    var objUrl = URL.createObjectURL(blob);
     if (ext === 'pdf') {
-      el.innerHTML = '<a href="' + objUrl + '" target="_blank" style="display:block;padding:20px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:13px;text-decoration:none">&#128196; PDF openen</a>';
+      // TC's downloadurl levert vaak application/octet-stream → browser downloadt i.p.v. preview.
+      // Forceer application/pdf zodat de blob inline rendert in iframe en in nieuw tabblad.
+      var pdfBlob = (blob.type === 'application/pdf') ? blob : new Blob([blob], { type: 'application/pdf' });
+      var pdfUrl = URL.createObjectURL(pdfBlob);
+      el.innerHTML =
+        '<iframe src="' + esc(pdfUrl) + '" style="width:100%;height:420px;border:1px solid #e8e0d8;border-radius:6px;background:#fff" title="' + esc(naam) + '"></iframe>' +
+        '<a href="' + esc(pdfUrl) + '" target="_blank" style="display:block;margin-top:8px;padding:10px;text-align:center;background:#f5f0ea;border-radius:6px;border:1px solid #e8e0d8;color:var(--af);font-weight:600;font-size:12px;text-decoration:none">&#128196; PDF in nieuw tabblad openen</a>';
     } else {
+      var objUrl = URL.createObjectURL(blob);
       el.innerHTML = '<img src="' + esc(objUrl) + '" alt="' + esc(naam) + '">';
     }
   } catch(e) {
@@ -3531,7 +3560,8 @@ function toonReleaseDetail(relId) {
     var mod = f.modifiedOn ? fmtDate(f.modifiedOn) : '';
     html += '<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:8px 12px">';
     if (pid && f.id) {
-      html += '<a href="' + tcFileUrl(f.id, naam, doc && doc.file_location) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
+      var relVer = f.versionId || f.version || (doc && doc._versionId) || f.id;
+      html += '<a href="' + tcFileUrl(f.id, relVer, naam, doc && doc.file_location) + '" target="_blank" style="color:var(--af);text-decoration:none">' + naam + '</a>';
     } else { html += naam; }
     html += '</td><td style="padding:8px">' + rev + '</td><td style="padding:8px;color:#888">' + mod + '</td>';
     html += '<td style="padding:8px;text-align:center"><button onclick="removeFromRelease(\'' + rel.id + '\',\'' + (f.id||'') + '\',\'' + naam.replace(/'/g,"\\'") + '\')" style="background:none;border:1px solid #ddd;border-radius:4px;cursor:pointer;color:#c00;font-size:14px;padding:2px 6px" title="Verwijder uit release">&times;</button></td></tr>';
