@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="build" content="2026-04-30T13:30">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -3204,7 +3205,13 @@ function filt() {
     _updatesSnapshot.gewijzigd.forEach(function(v) { updatesVids[v] = 1; });
   }
   // Cache de kolomdefinities en zoekkolomsleutels één keer (was: per document opnieuw aangeroepen).
-  var _zoekKeys = z ? getCols().map(function(c) { return c.k; }) : null;
+  // Fallback: als getCols() (om wat voor reden ook) een lege set teruggeeft tijdens early load,
+  // val terug op ALL_COLS zodat zoeken altijd over de volledige bekende veld-set werkt.
+  var _zoekKeys = null;
+  if (z) {
+    _zoekKeys = getCols().map(function(c) { return c.k; });
+    if (!_zoekKeys.length) _zoekKeys = ALL_COLS.map(function(c) { return c.k; });
+  }
   var d = docs.filter(function(d) {
     if (useUpdatesFilter && !updatesVids[d._vid]) return false;
     if (actMap && actMap.indexOf(d.file_location)===-1) return false;
@@ -4001,6 +4008,9 @@ async function loadProjectColConfig() {
   if (colProfile === 'standaard') {
     applyStandaardProfile();
     COLS = getCols();
+    // Forceer een render zodat de tabel + filter-dropdowns syncen met de nieuwe kolom-set.
+    // Zonder dit blijft state inconsistent tot de gebruiker handmatig profielwisselt.
+    try { vulFilters(); bouwTH(); renderT(); } catch(_) {}
   }
 }
 
