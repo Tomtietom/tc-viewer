@@ -403,7 +403,7 @@ td a:hover{color:var(--af);text-decoration:underline}
 
     <!-- Zoekbox — altijd zichtbaar -->
     <div class="sb-sec">
-      <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel...">
+      <input type="text" class="sbox" id="searchBox" placeholder="Zoek op naam, nummer, titel..." oninput="onSearchInput()">
     </div>
 
     <!-- Filters — collapsible, standaard dicht -->
@@ -2477,11 +2477,9 @@ function toonDocs() {
     } catch(e) {}
     vulFilters(); bouwBoom(); renderColChecks(); bouwTH(); renderT();
     autoOpenSidebarSections();
-    var _searchTimer = null;
-    document.getElementById('searchBox').addEventListener('input', function() {
-      if (_searchTimer) clearTimeout(_searchTimer);
-      _searchTimer = setTimeout(renderT, 150);
-    });
+    // Zoekbox-listener wordt via inline `oninput="onSearchInput()"` op het input-element
+    // gebound (zie #searchBox in de HTML). Dat voorkomt timing-issues met
+    // addEventListener bij eerste pagina-load.
   } else {
     // Herrender bij terugnavigatie (metadata + mappen kunnen intussen geladen zijn).
     // Boom opnieuw bouwen zodat lege mappen / nieuw gevonden submappen ook verschijnen.
@@ -2830,12 +2828,14 @@ function _mergeNewFilesIntoDocs(newFiles) {
 }
 
 // Bouw een TC-URL voor een map op basis van het pad (gebruikt folderIdByPath).
+// Optionele fileId selecteert dat bestand in de map zodra TC de pagina laadt.
 // Geeft null als de folder-ID niet bekend is (bv. doc zonder volledig pad).
-function folderUrlForPath(pathLoc) {
+function folderUrlForPath(pathLoc, fileId) {
   if (!pathLoc || !pid) return null;
   var folderId = folderIdByPath[pathLoc];
   if (!folderId) return null;
-  return 'https://web.connect.trimble.com/projects/' + pid + '/files/' + folderId;
+  var base = 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(folderId);
+  return fileId ? base + '?fileId=' + encodeURIComponent(fileId) : base;
 }
 
 // Navigeer naar een map vanuit het detail-paneel (klikbaar pad).
@@ -3150,6 +3150,16 @@ function resetFilters() {
   renderT();
 }
 
+// Zoekbox debounce — wordt direct vanuit het input-element aangeroepen via oninput-attribuut.
+// Globale scope = altijd beschikbaar, ook als de listener-binding via JS faalde of niet werd uitgevoerd.
+var _searchTimer = null;
+function onSearchInput() {
+  if (_searchTimer) clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(function() {
+    try { renderT(); } catch (e) { console.error('[Zoek] renderT error:', e); }
+  }, 80);
+}
+
 function filt() {
   var z = document.getElementById('searchBox').value.toLowerCase();
   var metaFilter = (document.getElementById('fMetaFilter') || {}).value || '';
@@ -3342,25 +3352,24 @@ function fmtDate(s) {
 
 var EXT_3D = ['ifc','rvt','nwd','nwc','dgn','dwg','skp','fbx','obj','3ds'];
 // Bouw een TC-URL voor een bestand. Kiest het juiste viewer-endpoint op basis van extensie:
-//   - 3D-bestand → /detailviewer?fileId=X&versionId=Y (3D viewer)
+//   - 3D-bestand → /viewer/3d?modelId=X (officiële 3D-viewer-deeplink, zie docs.3d.connect.trimble.com)
 //   - 2D/PDF/anders → /viewer/2D?id=X&version=Y (2D/PDF viewer)
-// versionId is essentieel: zonder gevulde version-param toont TC een leeg tabblad.
-// Fallback (geen versionId beschikbaar): folder-URL met file-context.
+// Voor 2D is de version-param essentieel; voor 3D pakt de viewer zelf de laatste versie.
+// Fallback (helemaal geen IDs): folder-URL met file-context.
 function tcFileUrl(vid, versionId, naam, fileLocation) {
   if (!pid || !vid) return '#';
   var ext = (naam || '').split('.').pop().toLowerCase();
+  if (EXT_3D.indexOf(ext) >= 0) {
+    return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
+           '/viewer/3d?modelId=' + encodeURIComponent(vid);
+  }
   var ver = versionId || vid;
   if (ver) {
-    if (EXT_3D.indexOf(ext) >= 0) {
-      return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
-             '/detailviewer?fileId=' + encodeURIComponent(vid) +
-             '&versionId=' + encodeURIComponent(ver);
-    }
     return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
            '/viewer/2D?id=' + encodeURIComponent(vid) +
            '&version=' + encodeURIComponent(ver);
   }
-  var folderUrl = fileLocation ? folderUrlForPath(fileLocation) : null;
+  var folderUrl = fileLocation ? folderUrlForPath(fileLocation, vid) : null;
   if (folderUrl) return folderUrl;
   return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(vid);
 }
