@@ -2827,15 +2827,32 @@ function _mergeNewFilesIntoDocs(newFiles) {
   docs.forEach(function(d) { if (!d.file_location) d.file_location = '(root)'; if (!mapS[d.file_location]) mapS[d.file_location] = []; mapS[d.file_location].push(d); });
 }
 
-// Bouw een TC-URL voor een map op basis van het pad (gebruikt folderIdByPath).
-// Optionele fileId selecteert dat bestand in de map zodra TC de pagina laadt.
-// Geeft null als de folder-ID niet bekend is (bv. doc zonder volledig pad).
+// Bouw een TC-URL voor een map op basis van het pad. Gebruikt de viewer-URL van een bestand
+// in die map: TC opent de viewer met de verkenner aan de linkerkant gepositioneerd op de map.
+// Dat werkt betrouwbaarder dan de "rauwe" /files/{folderId}-URL, die in de huidige TC-build
+// een lege verkenner toonde.
+// Param fileId is optioneel — als niet meegegeven pakt deze het eerste bestand uit de map.
 function folderUrlForPath(pathLoc, fileId) {
   if (!pathLoc || !pid) return null;
+  // Probeer een bestand-URL: dat positioneert TC's verkenner automatisch op die map
+  if (!fileId && mapS && mapS[pathLoc] && mapS[pathLoc].length) {
+    var first = mapS[pathLoc][0];
+    if (first && first._vid) {
+      fileId = first._vid;
+      var fver = first._versionId || first._vid;
+      return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
+             '/viewer/2D?id=' + encodeURIComponent(fileId) +
+             '&version=' + encodeURIComponent(fver);
+    }
+  }
+  if (fileId) {
+    return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
+           '/viewer/2D?id=' + encodeURIComponent(fileId);
+  }
+  // Laatste fallback: folder-URL (kan in huidige TC-build leeg zijn, beter dan niks)
   var folderId = folderIdByPath[pathLoc];
   if (!folderId) return null;
-  var base = 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(folderId);
-  return fileId ? base + '?fileId=' + encodeURIComponent(fileId) : base;
+  return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(folderId);
 }
 
 // Navigeer naar een map vanuit het detail-paneel (klikbaar pad).
@@ -3152,11 +3169,16 @@ function resetFilters() {
 
 // Zoekbox debounce — wordt direct vanuit het input-element aangeroepen via oninput-attribuut.
 // Globale scope = altijd beschikbaar, ook als de listener-binding via JS faalde of niet werd uitgevoerd.
+// Debug-logs blijven staan tot het zoekprobleem definitief weg is.
 var _searchTimer = null;
 function onSearchInput() {
+  var sb = document.getElementById('searchBox');
+  console.log('[Zoek] onSearchInput, value:', sb && sb.value);
   if (_searchTimer) clearTimeout(_searchTimer);
   _searchTimer = setTimeout(function() {
-    try { renderT(); } catch (e) { console.error('[Zoek] renderT error:', e); }
+    console.log('[Zoek] debounce klaar, renderT aanroepen, docs:', (typeof docs !== 'undefined' && docs) ? docs.length : 'undef');
+    try { renderT(); console.log('[Zoek] renderT() klaar'); }
+    catch (e) { console.error('[Zoek] renderT error:', e); }
   }, 80);
 }
 
