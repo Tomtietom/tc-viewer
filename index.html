@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-04-30T13:30">
+<meta name="build" content="2026-04-30T14:15">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -2828,29 +2828,10 @@ function _mergeNewFilesIntoDocs(newFiles) {
   docs.forEach(function(d) { if (!d.file_location) d.file_location = '(root)'; if (!mapS[d.file_location]) mapS[d.file_location] = []; mapS[d.file_location].push(d); });
 }
 
-// Bouw een TC-URL voor een map op basis van het pad. Gebruikt de viewer-URL van een bestand
-// in die map: TC opent de viewer met de verkenner aan de linkerkant gepositioneerd op de map.
-// Dat werkt betrouwbaarder dan de "rauwe" /files/{folderId}-URL, die in de huidige TC-build
-// een lege verkenner toonde.
-// Param fileId is optioneel — als niet meegegeven pakt deze het eerste bestand uit de map.
-function folderUrlForPath(pathLoc, fileId) {
+// Bouw een TC-URL voor een map op basis van het pad. Opent de map in TC's verkenner
+// (geen specifiek bestand). Geeft null als de folder-ID niet bekend is.
+function folderUrlForPath(pathLoc) {
   if (!pathLoc || !pid) return null;
-  // Probeer een bestand-URL: dat positioneert TC's verkenner automatisch op die map
-  if (!fileId && mapS && mapS[pathLoc] && mapS[pathLoc].length) {
-    var first = mapS[pathLoc][0];
-    if (first && first._vid) {
-      fileId = first._vid;
-      var fver = first._versionId || first._vid;
-      return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
-             '/viewer/2D?id=' + encodeURIComponent(fileId) +
-             '&version=' + encodeURIComponent(fver);
-    }
-  }
-  if (fileId) {
-    return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) +
-           '/viewer/2D?id=' + encodeURIComponent(fileId);
-  }
-  // Laatste fallback: folder-URL (kan in huidige TC-build leeg zijn, beter dan niks)
   var folderId = folderIdByPath[pathLoc];
   if (!folderId) return null;
   return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(folderId);
@@ -3170,16 +3151,11 @@ function resetFilters() {
 
 // Zoekbox debounce — wordt direct vanuit het input-element aangeroepen via oninput-attribuut.
 // Globale scope = altijd beschikbaar, ook als de listener-binding via JS faalde of niet werd uitgevoerd.
-// Debug-logs blijven staan tot het zoekprobleem definitief weg is.
 var _searchTimer = null;
 function onSearchInput() {
-  var sb = document.getElementById('searchBox');
-  console.log('[Zoek] onSearchInput, value:', sb && sb.value);
   if (_searchTimer) clearTimeout(_searchTimer);
   _searchTimer = setTimeout(function() {
-    console.log('[Zoek] debounce klaar, renderT aanroepen, docs:', (typeof docs !== 'undefined' && docs) ? docs.length : 'undef');
-    try { renderT(); console.log('[Zoek] renderT() klaar'); }
-    catch (e) { console.error('[Zoek] renderT error:', e); }
+    try { renderT(); } catch (e) { console.error('[Zoek] renderT error:', e); }
   }, 80);
 }
 
@@ -3249,7 +3225,6 @@ function filt() {
     var vb = String(docVal(b, sortK) == null ? '' : docVal(b, sortK)).toLowerCase();
     return sortD === 'asc' ? va.localeCompare(vb, 'nl') : vb.localeCompare(va, 'nl');
   });
-  if (z) console.log('[Zoek-filt] z=' + JSON.stringify(z) + ' zoekKeys.length=' + (_zoekKeys ? _zoekKeys.length : 'null') + ' → ' + d.length + ' van ' + docs.length + ' docs');
   return d;
 }
 
@@ -3373,11 +3348,6 @@ function renderT() {
   // (die was misleidend: 1 toonde bij "Geen groepering" terwijl er meer mappen waren).
   var mappenCount = (allFolderPaths && allFolderPaths.size) ? allFolderPaths.size : Object.keys(mapS).length;
   document.getElementById('ftr2').textContent = mappenCount + ' mappen';
-  if (document.getElementById('searchBox').value) {
-    var trCount = document.querySelectorAll('#tBody tr').length;
-    var bodyEl = document.getElementById('tBody');
-    console.log('[Zoek-render] filtered=' + filtered.length + ' tBody.children=' + bodyEl.children.length + ' tr-count=' + trCount + ' display=' + getComputedStyle(bodyEl).display);
-  }
 }
 
 function fmtDate(s) {
@@ -3404,7 +3374,7 @@ function tcFileUrl(vid, versionId, naam, fileLocation) {
            '/viewer/2D?id=' + encodeURIComponent(vid) +
            '&version=' + encodeURIComponent(ver);
   }
-  var folderUrl = fileLocation ? folderUrlForPath(fileLocation, vid) : null;
+  var folderUrl = fileLocation ? folderUrlForPath(fileLocation) : null;
   if (folderUrl) return folderUrl;
   return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(vid);
 }
@@ -3988,29 +3958,33 @@ function getHubSessionToken() {
 
 async function loadProjectColConfig() {
   if (!pid) return;
-  var token = getHubSessionToken();
-  if (!token) { console.warn('[TC] Geen hub session token, skip config laden'); return; }
-  var resp = await fetch(HUB_BASE + '/api/extension-config?slug=documentenlijst&project=' + encodeURIComponent(pid) + '&key=default_columns', {
-    headers: { 'X-Session': token }
-  });
-  if (!resp.ok) { console.warn('[TC] Config endpoint:', resp.status); return; }
-  var data = await resp.json();
-  if (!data.found || !data.value) { console.log('[TC] Geen project kolom-config gevonden, gebruik hardcoded standaard'); return; }
-  var cfg = data.value;
-  if (cfg.visible && Array.isArray(cfg.visible)) {
-    DEFAULT_VISIBLE = cfg.visible;
-    console.log('[TC] Project standaard kolommen geladen:', DEFAULT_VISIBLE.length, 'velden (door', data.updatedBy + ')');
-  }
-  if (cfg.order && Array.isArray(cfg.order)) {
-    DEFAULT_ORDER = cfg.order;
-  }
-  // Pas toe als gebruiker op standaard-profiel staat
-  if (colProfile === 'standaard') {
-    applyStandaardProfile();
-    COLS = getCols();
-    // Forceer een render zodat de tabel + filter-dropdowns syncen met de nieuwe kolom-set.
-    // Zonder dit blijft state inconsistent tot de gebruiker handmatig profielwisselt.
-    try { vulFilters(); bouwTH(); renderT(); } catch(_) {}
+  try {
+    var token = getHubSessionToken();
+    if (!token) { console.warn('[TC] Geen hub session token, skip config laden'); return; }
+    var resp = await fetch(HUB_BASE + '/api/extension-config?slug=documentenlijst&project=' + encodeURIComponent(pid) + '&key=default_columns', {
+      headers: { 'X-Session': token }
+    });
+    if (!resp.ok) { console.warn('[TC] Config endpoint:', resp.status); return; }
+    var data = await resp.json();
+    if (!data.found || !data.value) { console.log('[TC] Geen project kolom-config gevonden, gebruik hardcoded standaard'); return; }
+    var cfg = data.value;
+    if (cfg.visible && Array.isArray(cfg.visible)) {
+      DEFAULT_VISIBLE = cfg.visible;
+      console.log('[TC] Project standaard kolommen geladen:', DEFAULT_VISIBLE.length, 'velden (door', data.updatedBy + ')');
+    }
+    if (cfg.order && Array.isArray(cfg.order)) {
+      DEFAULT_ORDER = cfg.order;
+    }
+    if (colProfile === 'standaard') {
+      applyStandaardProfile();
+      COLS = getCols();
+    }
+  } finally {
+    // Altijd herrenderen na hub-call (gelukt, mislukt of geen config) zodat ext-chips,
+    // groepering en filter-dropdowns synchroon zijn met de actuele docs[] en kolom-state.
+    // Zonder dit werkten chips/groepering pas na handmatige profielwissel in projecten
+    // zonder hub-config.
+    try { if (typeof renderT === 'function') { vulFilters(); bouwTH(); renderT(); } } catch(_) {}
   }
 }
 
