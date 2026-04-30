@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-04-30T14:15">
+<meta name="build" content="2026-04-30T14:45">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -2830,11 +2830,13 @@ function _mergeNewFilesIntoDocs(newFiles) {
 
 // Bouw een TC-URL voor een map op basis van het pad. Opent de map in TC's verkenner
 // (geen specifiek bestand). Geeft null als de folder-ID niet bekend is.
+// URL-patroon: /projects/{pid}/data/folder/{folderId} — bevestigd door TC's eigen
+// adresbalk bij handmatige navigatie. /files/{folderId} gaf een leeg scherm.
 function folderUrlForPath(pathLoc) {
   if (!pathLoc || !pid) return null;
   var folderId = folderIdByPath[pathLoc];
   if (!folderId) return null;
-  return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/files/' + encodeURIComponent(folderId);
+  return 'https://web.connect.trimble.com/projects/' + encodeURIComponent(pid) + '/data/folder/' + encodeURIComponent(folderId);
 }
 
 // Navigeer naar een map vanuit het detail-paneel (klikbaar pad).
