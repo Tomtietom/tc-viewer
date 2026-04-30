@@ -3242,6 +3242,7 @@ function filt() {
     var vb = String(docVal(b, sortK) == null ? '' : docVal(b, sortK)).toLowerCase();
     return sortD === 'asc' ? va.localeCompare(vb, 'nl') : vb.localeCompare(va, 'nl');
   });
+  if (z) console.log('[Zoek-filt] z=' + JSON.stringify(z) + ' zoekKeys.length=' + (_zoekKeys ? _zoekKeys.length : 'null') + ' → ' + d.length + ' van ' + docs.length + ' docs');
   return d;
 }
 
@@ -3365,6 +3366,11 @@ function renderT() {
   // (die was misleidend: 1 toonde bij "Geen groepering" terwijl er meer mappen waren).
   var mappenCount = (allFolderPaths && allFolderPaths.size) ? allFolderPaths.size : Object.keys(mapS).length;
   document.getElementById('ftr2').textContent = mappenCount + ' mappen';
+  if (document.getElementById('searchBox').value) {
+    var trCount = document.querySelectorAll('#tBody tr').length;
+    var bodyEl = document.getElementById('tBody');
+    console.log('[Zoek-render] filtered=' + filtered.length + ' tBody.children=' + bodyEl.children.length + ' tr-count=' + trCount + ' display=' + getComputedStyle(bodyEl).display);
+  }
 }
 
 function fmtDate(s) {
