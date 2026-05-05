@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-04-30T15:15">
+<meta name="build" content="2026-05-05T22:30">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -228,6 +228,15 @@ td a:hover{color:var(--af);text-decoration:underline}
 .modal input:focus,.modal textarea:focus,.modal select:focus{border-color:var(--af)}
 .modal textarea{height:80px;resize:vertical}
 .modal .file-list{background:var(--g1);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:var(--fs-xs);color:var(--g5);max-height:180px;overflow-y:auto;margin-bottom:var(--s1)}
+/* Settings-modal knoppen + checkbox-rij */
+.modal .actions{display:flex;gap:var(--s2);justify-content:flex-end;margin-top:var(--s5)}
+.modal .btn-primary{padding:8px var(--s4);background:var(--af);color:#fff;border:none;border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;transition:background .15s}
+.modal .btn-primary:hover{background:var(--af2)}
+.modal .btn-secondary{padding:8px var(--s4);background:transparent;color:var(--g5);border:1px solid var(--hl);border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:600;cursor:pointer;font-family:'Poppins',sans-serif;transition:border-color .15s}
+.modal .btn-secondary:hover{border-color:var(--g3)}
+.modal .checkbox-row{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) 0;cursor:pointer}
+.modal .checkbox-row input[type=checkbox]{width:auto;margin:0;flex-shrink:0;accent-color:var(--af);cursor:pointer}
+.modal .checkbox-row span{font-size:var(--fs-md);color:var(--g6)}
 /* Release-dialog per-bestand rij met versie-info/picker */
 .rf-row{padding:var(--s2) 0;border-bottom:1px solid var(--hl-light)}
 .rf-row:last-child{border:none}
@@ -902,6 +911,13 @@ async function initTCExtension() {
           window.location.href = TARGETS[cmd];
         }
       }
+      // configCommand uit manifest (tandwiel-icoon in TC-extensies-instellingen)
+      if (event === 'extension.command') {
+        var cmdString = (typeof data === 'string') ? data : (data && data.data);
+        if (cmdString === 'open_settings') {
+          openSettingsModal();
+        }
+      }
     }, 15000);
     console.log('[TC] Verbonden met Workspace API', _fromCockpit ? '(uit cockpit)' : '');
 
@@ -1424,12 +1440,17 @@ async function tcAutoFetchData() {
 
     // === ACHTERGROND: DEEP-SCAN voor bestanden zonder bulk-match ===
     // Niet awaiten — UI is direct bruikbaar, metadata komt gaandeweg binnen
-    try {
-      var _libIdDeep = 'tcproject:prod:' + pid;
-      tcGetMetadataDeep(pid, _libIdDeep, docs).catch(function(e) {
-        console.warn('[TC] Deep-scan mislukt:', e && e.message);
-      });
-    } catch(e) { console.warn('[TC] Deep-scan kon niet starten:', e.message); }
+    // Skip als gebruiker deep-scan via instellingen heeft uitgeschakeld
+    if (typeof getSetting === 'function' && getSetting('disableDeepScan') === true) {
+      console.log('[Settings] Deep-scan overgeslagen op basis van gebruikersvoorkeur (disableDeepScan=true)');
+    } else {
+      try {
+        var _libIdDeep = 'tcproject:prod:' + pid;
+        tcGetMetadataDeep(pid, _libIdDeep, docs).catch(function(e) {
+          console.warn('[TC] Deep-scan mislukt:', e && e.message);
+        });
+      } catch(e) { console.warn('[TC] Deep-scan kon niet starten:', e.message); }
+    }
 
     // === PROJECT STANDAARD KOLOMMEN LADEN VIA HUB ===
     try { await loadProjectColConfig(); } catch(e) { console.warn('[TC] Project kolom-config laden mislukt:', e.message); }
@@ -1897,6 +1918,9 @@ async function tcGetMetadata(projectId, bestanden) {
   if (!_hasMetaSchema) {
     console.log('[TC] Project heeft geen metadata-schema (geen PSet-definitie). Filter/edit-functies worden verborgen.');
   }
+  // Edits-buffer mergen — preserveert net-bewerkte data over hard refresh heen,
+  // ongeacht of TC's bulk-endpoint al synchroon is met onze writes.
+  try { _editBufMergeIntoDocs(projectId, bestanden); } catch(_) {}
 }
 
 // Schakel filter/bulk-edit/metadata-kolommen uit als het project geen PSet-schema heeft.
@@ -1979,6 +2003,82 @@ var _DEEP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 uur — hard expire
 var _DEEP_CACHE_FRESH_MS = 2 * 60 * 1000;     // < 2 min = geen revalidate (echte besparing)
 var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
+
+// === EDITS-BUFFER ===
+// Lokale staat van net-bewerkte PSet-instances, in localStorage zodat ze een hard refresh
+// overleven. Reden: TC's bulk-endpoint /libs/{lib}/psets is eventually consistent — net-
+// bewerkte instances retourneren minutenlang stale of incomplete props. Zonder buffer
+// vallen we bij heropen terug op die stale data en lijken metadata-edits "verdwenen".
+//
+// Lifecycle: saveCell schrijft hier de complete props uit de changeset-response. Bij
+// elke metadata-load (na bulk + na deep-scan) merge we de buffer over docs[]; entries
+// die TC inmiddels bevestigt worden meteen opgeschoond. Hard fallback: 30 min TTL.
+var _EDIT_BUF_TTL_MS = 30 * 60 * 1000;
+function _editBufKey(projId) { return 'editBuf:' + projId; }
+function _editBufGetAll(projId) {
+  try {
+    var raw = localStorage.getItem(_editBufKey(projId));
+    if (!raw) return {};
+    var obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch(_) { return {}; }
+}
+function _editBufWriteAll(projId, obj) {
+  try { localStorage.setItem(_editBufKey(projId), JSON.stringify(obj || {})); } catch(_) {}
+}
+function _editBufSet(projId, vid, props) {
+  if (!projId || !vid) return;
+  var buf = _editBufGetAll(projId);
+  buf[vid] = { props: props || {}, ts: Date.now() };
+  _editBufWriteAll(projId, buf);
+}
+function _editBufDelete(projId, vid) {
+  if (!projId || !vid) return;
+  var buf = _editBufGetAll(projId);
+  if (buf[vid]) { delete buf[vid]; _editBufWriteAll(projId, buf); }
+}
+// Merge buffer over docs[]. Roept _applyPSetPropsToBestand aan om in-memory state
+// te overschrijven met de lokale waarheid. Entries waar TC's data al matcht → opgeruimd.
+function _editBufMergeIntoDocs(projId, bestanden) {
+  var buf = _editBufGetAll(projId);
+  if (!buf || !Object.keys(buf).length) return 0;
+  var lookup = {};
+  bestanden.forEach(function(b) { if (b._vid) lookup[b._vid] = b; });
+  var nu = Date.now();
+  var changed = false;
+  var applied = 0;
+  for (var vid in buf) {
+    var entry = buf[vid];
+    if (!entry || typeof entry.ts !== 'number' || (nu - entry.ts) > _EDIT_BUF_TTL_MS) {
+      delete buf[vid]; changed = true; continue;
+    }
+    var b = lookup[vid];
+    if (!b) continue; // doc niet gevonden — laat entry staan, mogelijk volgende reload wel
+    var bufProps = entry.props || {};
+    // Check of TC-data al synchroon is met buffer voor alle gewijzigde velden
+    var inSync = true;
+    for (var pid in bufProps) {
+      var fn = PROP_MAP[pid];
+      if (!fn) continue;
+      var bufVal = String(bufProps[pid] || '').trim();
+      var docVal = String(b[fn] || '').trim();
+      if (bufVal !== docVal) { inSync = false; break; }
+    }
+    if (inSync) {
+      // TC heeft de update doorgevoerd → buffer-entry opruimen
+      delete buf[vid]; changed = true;
+      continue;
+    }
+    // TC nog niet synchroon → lokale buffer-staat preserveren
+    if (typeof _applyPSetPropsToBestand === 'function') {
+      _applyPSetPropsToBestand(b, bufProps, b._psetLink || ('frn:tcfile:' + vid));
+    }
+    applied++;
+  }
+  if (changed) _editBufWriteAll(projId, buf);
+  if (applied > 0) console.log('[TC] Edits-buffer toegepast op ' + applied + ' bestand(en) — TC bulk nog niet synchroon');
+  return applied;
+}
 
 function _psetDeepCacheKey(projId, vid) {
   // V3: bumped 2026-04-29 — V2 entries cachen 404 onder versionId (verkeerde key) ipv vid;
@@ -2232,6 +2332,9 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
     };
   }
 
+  // Edits-buffer opnieuw mergen — deep-scan kan instances binnenhalen die onze lokale
+  // wijzigingen overschrijven (bv. revalidate-tak met stale TC-data).
+  try { _editBufMergeIntoDocs(projectId, bestanden); } catch(_) {}
   // Eind-render + banner-update
   try { renderT(); } catch(_) {}
   try { toonMetaWaarschuwingIndienNodig(
@@ -4280,9 +4383,33 @@ async function saveCell(doc, field, value, el) {
     }
     // Pas NA succesvolle bevestiging de lokale state aanpassen
     doc[field] = value;
-    // Cache invalideren — opnieuw ophalen zorgt dat we niet vastzitten op stale waarden
-    try { _psetDeepCacheSet(pid, doc._vid, null); } catch(_) {}
+    // Lokale staat + cache + edits-buffer synchroniseren met TC's daadwerkelijke response.
+    // TC's bulk PSet-endpoint is eventually consistent: net-bewerkte data komt minutenlang
+    // niet correct terug. Buffer + cache zorgen dat een hard refresh nooit meer "metadata
+    // weg" oplevert.
+    try {
+      var serverProps = (respJson && respJson.items && respJson.items[0] && respJson.items[0].props) || null;
+      if (serverProps) {
+        // doc[] volledig aligneren met server (niet alleen het gewijzigde veld)
+        if (typeof _applyPSetPropsToBestand === 'function') {
+          _applyPSetPropsToBestand(doc, serverProps, doc._psetLink || ('frn:tcfile:' + doc._vid));
+        }
+        // Cache vullen i.p.v. invalideren — bij heropen vinden we de nieuwe waarheid in cache
+        _psetDeepCacheSet(pid, doc._vid, { props: serverProps, status: 200 });
+        // Buffer schrijven — overleeft hard refresh, wordt opgeruimd zodra bulk synchroon is
+        _editBufSet(pid, doc._vid, serverProps);
+      } else {
+        // Geen server-response props (uitzonderlijk) — fallback: cache invalideren
+        _psetDeepCacheSet(pid, doc._vid, null);
+      }
+    } catch(_) {}
     console.log('[TC] Opgeslagen:', doc.bestandsnaam, field, '=', value);
+    // Sanity check via /versions endpoint (de canonical endpoint die TC's web-UI gebruikt).
+    // 1.5s vertraging zodat TC zijn write heeft kunnen propageren. Doel: edge-cases
+    // detecteren waarin replace-semantiek velden heeft weggegooid die wij niet meestuurden.
+    setTimeout(function() {
+      _sanityCheckPsetVersion(doc).catch(function(e) { console.warn('[TC] Sanity check fout:', e && e.message); });
+    }, 1500);
     // Nieuwe waarde incrementeel toevoegen aan datalist (geen volledige rebuild)
     try { addDatalistValue(field, value); } catch(_) {}
     // Visuele feedback: succes = groen, na 1.5s terug naar normaal
@@ -4297,6 +4424,40 @@ async function saveCell(doc, field, value, el) {
     if (el) { el.style.borderColor = '#ef4444'; el.style.background = '#fef2f2'; }
     alert('Opslaan mislukt: ' + e.message);
   }
+}
+
+// Sanity check na een save: haal de echte server-state via /versions (canonical endpoint
+// die TC's web-UI gebruikt) en synchroniseer doc + cache + buffer ermee. Detecteert
+// stille data-loss bij replace-semantiek en zorgt dat de cache de waarheid bevat.
+async function _sanityCheckPsetVersion(doc) {
+  if (!doc || !pid || !doc._vid) return;
+  var libId = 'tcproject:prod:' + pid;
+  var link = doc._psetLink || ('frn:tcfile:' + doc._vid);
+  var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles/versions';
+  await _ensureValidToken();
+  var resp = await tcFetchPSet(path, { rawResponse: true });
+  if (!resp || resp.status !== 200) return;
+  var txt = await resp.text();
+  if (!txt) return;
+  var body = JSON.parse(txt);
+  if (body && body.found === false) return; // proxy-fallback voor 404
+  var items = body && Array.isArray(body.items) ? body.items : [];
+  var inst = items.length > 0 ? items[0] : null;
+  if (!inst || !inst.props) return;
+  // Update doc, cache en buffer met de canonical state
+  if (typeof _applyPSetPropsToBestand === 'function') {
+    _applyPSetPropsToBestand(doc, inst.props, inst.link || link);
+  }
+  _psetDeepCacheSet(pid, doc._vid, { props: inst.props, status: 200 });
+  _editBufSet(pid, doc._vid, inst.props);
+  var sample = [];
+  for (var p in inst.props) {
+    var fn = PROP_MAP[p];
+    if (fn && inst.props[p]) { sample.push(fn + '="' + inst.props[p] + '"'); if (sample.length >= 4) break; }
+  }
+  console.log('[TC] Sanity check via /versions: ' + doc.bestandsnaam + ' — ' + sample.join(', ') + (sample.length >= 4 ? ', ...' : ''));
+  // Re-render zodat eventuele divergentie tussen doc[] en saveCell-update zichtbaar wordt
+  try { renderT(); } catch(_) {}
 }
 
 // === DELEN ===
@@ -4815,10 +4976,86 @@ async function submitRelease() {
   btn.textContent = '📦 Toevoegen';
 }
 
+// === SETTINGS (configCommand: open_settings) ===
+// localStorage-prefix 'atfielt_doclist_' voor naamspace-isolatie tussen At Fielt extensies
+var SETTINGS_PREFIX = 'atfielt_doclist_';
+var SETTINGS_DEFAULTS = {
+  exportFormat: 'csv',          // 'csv' | 'xlsx' | 'zip'
+  includeDeleted: false,        // verwijderde documenten tonen
+  disableDeepScan: false        // deep-scan automatisch uitschakelen (default: scan loopt)
+};
+function getSetting(key) {
+  var raw = localStorage.getItem(SETTINGS_PREFIX + key);
+  if (raw === null) return SETTINGS_DEFAULTS[key];
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
+}
+function setSetting(key, value) {
+  localStorage.setItem(SETTINGS_PREFIX + key, String(value));
+}
+function openSettingsModal() {
+  // Huidige waarden laden in de inputs
+  document.getElementById('setting-export-format').value = getSetting('exportFormat');
+  document.getElementById('setting-include-deleted').checked = getSetting('includeDeleted') === true;
+  document.getElementById('setting-disable-deep-scan').checked = getSetting('disableDeepScan') === true;
+  document.getElementById('settingsModal').classList.add('vis');
+}
+function closeSettingsModal() {
+  document.getElementById('settingsModal').classList.remove('vis');
+}
+function saveSettingsModal() {
+  setSetting('exportFormat', document.getElementById('setting-export-format').value);
+  setSetting('includeDeleted', document.getElementById('setting-include-deleted').checked);
+  setSetting('disableDeepScan', document.getElementById('setting-disable-deep-scan').checked);
+  closeSettingsModal();
+  console.log('[Settings] Opgeslagen:', {
+    exportFormat: getSetting('exportFormat'),
+    includeDeleted: getSetting('includeDeleted'),
+    disableDeepScan: getSetting('disableDeepScan')
+  });
+}
+// Sluit modal bij klik op backdrop
+document.addEventListener('DOMContentLoaded', function() {
+  var bg = document.getElementById('settingsModal');
+  if (bg) bg.addEventListener('click', function(e) {
+    if (e.target === bg) closeSettingsModal();
+  });
+});
+
 // === START ===
 initTCExtension();
 </script>
 <!-- Autocomplete-voorstellen voor vrije tekstvelden (dynamisch gevuld door bouwDatalists) -->
 <div id="dlPool" style="display:none"></div>
+
+<!-- Settings modal (configCommand: open_settings — tandwiel-icoon in TC extensies-instellingen) -->
+<div id="settingsModal" class="modal-bg">
+  <div class="modal">
+    <h3>Instellingen — Documentenlijst</h3>
+
+    <label for="setting-export-format">Default export-formaat</label>
+    <select id="setting-export-format">
+      <option value="csv">CSV</option>
+      <option value="xlsx">Excel</option>
+      <option value="zip">ZIP met bestanden</option>
+    </select>
+
+    <label class="checkbox-row">
+      <input type="checkbox" id="setting-include-deleted">
+      <span>Verwijderde documenten tonen</span>
+    </label>
+
+    <label class="checkbox-row">
+      <input type="checkbox" id="setting-disable-deep-scan">
+      <span>Deep-scan uitschakelen bij openen (sneller laden, minder metadata)</span>
+    </label>
+
+    <div class="actions">
+      <button class="btn-secondary" onclick="closeSettingsModal()">Annuleren</button>
+      <button class="btn-primary" onclick="saveSettingsModal()">Opslaan</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
