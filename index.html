@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-05-05T23:15">
+<meta name="build" content="2026-05-05T23:55">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -1890,6 +1890,12 @@ async function tcGetMetadata(projectId, bestanden) {
       if (veldNaam && props[propId] && props[propId] !== '--') {
         b[veldNaam] = String(props[propId]).trim();
       }
+    }
+    // Deep-cache vullen vanuit bulk-match — zo heeft saveCell's UNION-merge later
+    // toegang tot de meest complete props die we ooit hebben gezien voor dit bestand.
+    // Eventueel-stale bulk-data is OK want UNION pakt de niet-lege values.
+    if (b._vid && Object.keys(props).length > 0) {
+      try { _psetDeepCacheSet(projectId, b._vid, { props: props, status: 200 }); } catch(_) {}
     }
   }
   if (dupCount > 0) console.log('[TC] PSet paginatie: ' + dupCount + ' duplicaat-instances overgeslagen');
@@ -4381,36 +4387,66 @@ async function saveCell(doc, field, value, el) {
   if (!propId) { console.warn('[TC] Geen UUID gevonden voor veld:', field, '| PROP_MAP keys:', Object.keys(PROP_MAP).length); return; }
 
   var libId = 'tcproject:prod:' + pid;
-  // Pre-save fetch: haal de ACTUELE server-state op. Voorkomt data-loss bij replace-
-  // semantiek wanneer ons in-memory doc[] incompleet is (bulk-endpoint is eventually
-  // consistent en kan lege of incomplete props teruggeven na recente edits).
-  var serverProps = await _fetchActueleServerProps(doc);
-  // Bouw changeset-props vanuit server-state + onze wijziging. Fallback op doc[]-loop
-  // als pre-save fetch faalt — beter een mogelijk-incomplete save dan helemaal geen.
+  // UNION-merge: bouw changeset-props uit ALLE bekende bronnen — geen enkele bron is
+  // betrouwbaar genoeg in zijn eentje (TC bulk + /versions zijn beide eventually
+  // consistent / soms incompleet). Door union te nemen verliezen we nooit data.
+  // Volgorde: doc[] → deep-cache → edits-buffer → server /versions. Latere bron wint
+  // bij conflict (= recentere bron). De wijziging zelf wint over alles.
   var props = {};
-  if (serverProps && Object.keys(serverProps).length > 0) {
-    // Server-state als basis: alle bestaande velden behouden
-    for (var sid in serverProps) {
-      if (serverProps[sid] !== undefined && serverProps[sid] !== null && serverProps[sid] !== '') {
-        props[sid] = serverProps[sid];
+  var bronnen = { doc: 0, cache: 0, buffer: 0, versions: 0 };
+
+  // 1. Basis: doc[] (in-memory state)
+  for (var id in PROP_MAP) {
+    var fn = PROP_MAP[id];
+    if (fn && doc[fn]) { props[id] = doc[fn]; bronnen.doc++; }
+  }
+
+  // 2. Deep-cache (laatst-bekende complete fetch)
+  try {
+    var cached = _psetDeepCacheGet(pid, doc._vid);
+    if (cached && cached.props) {
+      for (var cid in cached.props) {
+        if (cached.props[cid] !== undefined && cached.props[cid] !== null && cached.props[cid] !== '' && cached.props[cid] !== '--') {
+          if (!(cid in props)) bronnen.cache++;
+          props[cid] = cached.props[cid];
+        }
       }
     }
-    // Onze wijziging er overheen (lege string = veld leegmaken)
-    if (value === '' || value === null || value === undefined) {
-      delete props[propId];
-    } else {
-      props[propId] = value;
+  } catch(_) {}
+
+  // 3. Edits-buffer (onze laatste write-response — recenter dan cache)
+  try {
+    var bufAll = _editBufGetAll(pid);
+    var bufEntry = bufAll && bufAll[doc._vid];
+    if (bufEntry && bufEntry.props) {
+      for (var bid in bufEntry.props) {
+        if (bufEntry.props[bid] !== undefined && bufEntry.props[bid] !== null && bufEntry.props[bid] !== '') {
+          if (!(bid in props)) bronnen.buffer++;
+          props[bid] = bufEntry.props[bid];
+        }
+      }
     }
-    console.log('[TC] Pre-save fetch:', doc.bestandsnaam, '— ' + Object.keys(serverProps).length + ' velden uit TC');
-  } else {
-    // Geen server-state (404 of fetch faalde): fallback op doc[]-loop (oude gedrag)
-    for (var id in PROP_MAP) {
-      var fn = PROP_MAP[id];
-      if (fn === field) { if (value !== '' && value !== null && value !== undefined) props[id] = value; }
-      else if (doc[fn]) { props[id] = doc[fn]; }
+  } catch(_) {}
+
+  // 4. /versions canonical fetch — alleen TOEVOEGEN, niet overschrijven (onze writes
+  //    zijn recenter dan een eventueel-stale /versions snapshot)
+  var serverProps = await _fetchActueleServerProps(doc);
+  if (serverProps) {
+    for (var sid in serverProps) {
+      if (serverProps[sid] !== undefined && serverProps[sid] !== null && serverProps[sid] !== '' && serverProps[sid] !== '--') {
+        if (!(sid in props)) { props[sid] = serverProps[sid]; bronnen.versions++; }
+      }
     }
-    if (serverProps === null) console.log('[TC] Pre-save fetch geen data (nieuw bestand of fetch-fout) — fallback op doc[]-state');
   }
+
+  // 5. Apply de wijziging zelf (wint over alle bronnen)
+  if (value === '' || value === null || value === undefined) {
+    delete props[propId];
+  } else {
+    props[propId] = value;
+  }
+
+  console.log('[TC] Pre-save UNION:', doc.bestandsnaam, '— ' + Object.keys(props).length + ' velden uit doc:' + bronnen.doc + ' cache:+' + bronnen.cache + ' buffer:+' + bronnen.buffer + ' versions:+' + bronnen.versions);
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
   console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Alle props:', Object.keys(props).length, '| Link:', link);
   // Visuele feedback: bezig = oranje
