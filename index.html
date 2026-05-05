@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-05-05T22:30">
+<meta name="build" content="2026-05-05T23:15">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -4348,18 +4348,68 @@ async function bulkSave() {
   setTimeout(function() { statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
 }
 
+// Haal de actuele server-state van een PSet-instance op via /versions (canonical endpoint).
+// Returnt een object met UUID-keys, of null bij fout/timeout/404. Wordt door saveCell
+// gebruikt om changeset-props te bouwen vanuit de echte server-state, NIET vanuit het
+// mogelijk-stale lokale doc[]. Voorkomt data-loss bij replace-semantiek wanneer onze
+// in-memory data incompleet is door bulk eventual consistency.
+async function _fetchActueleServerProps(doc) {
+  if (!doc || !pid || !doc._vid) return null;
+  try {
+    var libId = 'tcproject:prod:' + pid;
+    var link = doc._psetLink || ('frn:tcfile:' + doc._vid);
+    var path = '/psets/' + encodeURIComponent(link) + '/' + encodeURIComponent(libId) + '/tcfiles/versions';
+    await _ensureValidToken();
+    var resp = await tcFetchPSet(path, { rawResponse: true });
+    if (!resp || resp.status !== 200) return null;
+    var txt = await resp.text();
+    if (!txt) return null;
+    var body = JSON.parse(txt);
+    if (body && body.found === false) return null;
+    var items = body && Array.isArray(body.items) ? body.items : [];
+    var inst = items.length > 0 ? items[0] : null;
+    return (inst && inst.props) ? inst.props : null;
+  } catch(e) {
+    console.warn('[TC] Pre-save fetch faalde voor', doc && doc.bestandsnaam, ':', e && e.message);
+    return null;
+  }
+}
+
 async function saveCell(doc, field, value, el) {
   var propId = null;
   for (var id in PROP_MAP) { if (PROP_MAP[id] === field) { propId = id; break; } }
   if (!propId) { console.warn('[TC] Geen UUID gevonden voor veld:', field, '| PROP_MAP keys:', Object.keys(PROP_MAP).length); return; }
 
   var libId = 'tcproject:prod:' + pid;
-  // Stuur ALLE bestaande props mee, niet alleen het gewijzigde veld (PSet API vervangt, merged niet)
+  // Pre-save fetch: haal de ACTUELE server-state op. Voorkomt data-loss bij replace-
+  // semantiek wanneer ons in-memory doc[] incompleet is (bulk-endpoint is eventually
+  // consistent en kan lege of incomplete props teruggeven na recente edits).
+  var serverProps = await _fetchActueleServerProps(doc);
+  // Bouw changeset-props vanuit server-state + onze wijziging. Fallback op doc[]-loop
+  // als pre-save fetch faalt — beter een mogelijk-incomplete save dan helemaal geen.
   var props = {};
-  for (var id in PROP_MAP) {
-    var fn = PROP_MAP[id];
-    if (fn === field) { props[id] = value; }
-    else if (doc[fn]) { props[id] = doc[fn]; }
+  if (serverProps && Object.keys(serverProps).length > 0) {
+    // Server-state als basis: alle bestaande velden behouden
+    for (var sid in serverProps) {
+      if (serverProps[sid] !== undefined && serverProps[sid] !== null && serverProps[sid] !== '') {
+        props[sid] = serverProps[sid];
+      }
+    }
+    // Onze wijziging er overheen (lege string = veld leegmaken)
+    if (value === '' || value === null || value === undefined) {
+      delete props[propId];
+    } else {
+      props[propId] = value;
+    }
+    console.log('[TC] Pre-save fetch:', doc.bestandsnaam, '— ' + Object.keys(serverProps).length + ' velden uit TC');
+  } else {
+    // Geen server-state (404 of fetch faalde): fallback op doc[]-loop (oude gedrag)
+    for (var id in PROP_MAP) {
+      var fn = PROP_MAP[id];
+      if (fn === field) { if (value !== '' && value !== null && value !== undefined) props[id] = value; }
+      else if (doc[fn]) { props[id] = doc[fn]; }
+    }
+    if (serverProps === null) console.log('[TC] Pre-save fetch geen data (nieuw bestand of fetch-fout) — fallback op doc[]-state');
   }
   var link = doc._psetLink || 'frn:tcfile:' + doc._vid;
   console.log('[TC] Opslaan:', doc.bestandsnaam, field, '=', value, '| UUID:', propId, '| Alle props:', Object.keys(props).length, '| Link:', link);
@@ -4444,18 +4494,37 @@ async function _sanityCheckPsetVersion(doc) {
   var items = body && Array.isArray(body.items) ? body.items : [];
   var inst = items.length > 0 ? items[0] : null;
   if (!inst || !inst.props) return;
-  // Update doc, cache en buffer met de canonical state
+  // Cache vullen — als bulk eventually consistent een ander beeld geeft, valt de cache
+  // terug op deze /versions-snapshot. Lokale doc-state wordt bijgewerkt voor zichtbare
+  // velden in de UI.
   if (typeof _applyPSetPropsToBestand === 'function') {
     _applyPSetPropsToBestand(doc, inst.props, inst.link || link);
   }
   _psetDeepCacheSet(pid, doc._vid, { props: inst.props, status: 200 });
-  _editBufSet(pid, doc._vid, inst.props);
+  // BEWUST GEEN _editBufSet hier: /versions kan minder velden retourneren dan onze
+  // changeset-response (TC-inconsistentie tussen endpoints). De buffer moet de
+  // changeset-response bewaren — die representeert wat we daadwerkelijk hebben
+  // ge-PUT en is de canonical "lokaal-gewijzigde-staat" voor heropen-fallback.
+  // Vergelijk met buffer en log eventuele divergentie.
+  var bufEntry = _editBufGetAll(pid)[doc._vid];
+  if (bufEntry && bufEntry.props) {
+    var missing = [];
+    for (var bp in bufEntry.props) {
+      if (!(bp in inst.props) || (inst.props[bp] || '') !== (bufEntry.props[bp] || '')) {
+        var fn = PROP_MAP[bp];
+        if (fn) missing.push(fn);
+      }
+    }
+    if (missing.length) {
+      console.warn('[TC] Sanity check waarschuwing: /versions retourneert ' + missing.length + ' veld(en) anders dan onze laatste write voor ' + doc.bestandsnaam + ' — velden: ' + missing.join(', ') + ' (TC eventually consistent — buffer blijft als fallback)');
+    }
+  }
   var sample = [];
   for (var p in inst.props) {
-    var fn = PROP_MAP[p];
-    if (fn && inst.props[p]) { sample.push(fn + '="' + inst.props[p] + '"'); if (sample.length >= 4) break; }
+    var fn2 = PROP_MAP[p];
+    if (fn2 && inst.props[p]) { sample.push(fn2 + '="' + inst.props[p] + '"'); if (sample.length >= 4) break; }
   }
-  console.log('[TC] Sanity check via /versions: ' + doc.bestandsnaam + ' — ' + sample.join(', ') + (sample.length >= 4 ? ', ...' : ''));
+  console.log('[TC] Sanity check via /versions: ' + doc.bestandsnaam + ' — ' + Object.keys(inst.props).length + ' velden in TC: ' + sample.join(', ') + (sample.length >= 4 ? ', ...' : ''));
   // Re-render zodat eventuele divergentie tussen doc[] en saveCell-update zichtbaar wordt
   try { renderT(); } catch(_) {}
 }
