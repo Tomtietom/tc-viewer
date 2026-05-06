@@ -2,11 +2,28 @@
 
 Open punten en ideeën voor volgende sessies. Geprioriteerd op impact.
 
-Laatst bijgewerkt: 2026-04-27.
+Laatst bijgewerkt: 2026-05-06.
 
 ---
 
 ## ✅ Recent afgerond (referentie)
+
+Opgenomen in v3.3 (mei 2026):
+
+**Bugfixes (Martin's lijst van 30 april + vervolg):**
+- **Zoekfunctie werkt direct na laden** — was pas actief na handmatige profielwissel. Oorzaak: race tussen async hub-config-load en eerste render. Nu altijd herrender via `finally`-block in `loadProjectColConfig`, plus `_zoekKeys`-fallback op `ALL_COLS` als `getCols()` te vroeg leeg is. Zoekbox-listener via `oninput`-attribuut op het input-element zelf — geen JS-bind-timing meer.
+- **Bestandstype-chips en groepering werken direct** — zelfde oorzaak als zoek, dezelfde fix.
+- **3D-bestand → 3D viewer met model** — was naar `/detailviewer?fileId=X&versionId=` (lege version). Nu officiële deeplink `/viewer/3d?modelId=X` (uit docs.3d.connect.trimble.com).
+- **PDF / 2D-bestand → 2D viewer met preview** — `/viewer/2D?id=X&version=Y` met versionId nu gevuld vanuit `_versionId`.
+- **"Open in TC" link in tabel + detail-paneel** — opent nu daadwerkelijk het bestand i.p.v. lege verkenner.
+- **Map-link (↗) in detail-paneel** — gebruikt nu `/data/folder/{folderId}` (TC's eigen URL-patroon, bevestigd via handmatige navigatie). Oude `/files/{folderId}` toonde lege verkenner.
+- **PDF-preview triggert geen download meer** — MIME geforceerd op `application/pdf` op de blob; iframe-versie verwijderd (Chrome blokkeerde blob: in geneste iframe). Knop "PDF openen" opent als preview in nieuw tabblad.
+- **Metadata-edits blijven behouden na hard refresh** — kritieke regressie. TC's PSet API is eventually consistent én inconsistent tussen endpoints (`/psets`, `/versions`, changeset-response retourneren elk verschillende velden). `saveCell` bouwt changeset-props nu uit een UNION van álle bronnen (`doc[]` + deep-cache + edits-buffer + `/versions`) — geen single source of truth meer. Plus localStorage-buffer (`editBuf:{pid}`, 30 min TTL) die hard refresh overleeft en automatisch opruimt zodra TC zichzelf bijgewerkt heeft.
+
+**Onder de motorkap:**
+- Cache-busting meta-tag (`<meta name="build">`) bumpen forceert browser/SW-revalidatie van de extensie-iframe.
+- `_psetDeepCacheSet` wordt nu ook gevuld vanuit bulk-match (was alleen vanuit deep-scan en saveCell) — geeft latere saves meer historische data om de UNION mee te bouwen.
+- Sanity check via `/versions` na elke save: diagnostische log die TC's inconsistentie zichtbaar maakt zonder data te overschrijven.
 
 Opgenomen in v3.2 (april 2026):
 - **Volledige metadata** via achtergrond-scan op per-bestand PSet endpoint (commit `999e71d`)
@@ -46,19 +63,7 @@ Geïdentificeerd na skill-pass (2026-04-28) tegen de officiële Trimble specs. G
 
 ## 🐛 Bugs (open)
 
-### Filter-bug (open sinds 2026-04-20)
-
-Gebruiker meldde: filters werken niet goed. Symptomen onbekend — Martin's mail noemde geen specifiek filter-probleem.
-
-**Bij volgende sessie vragen:**
-- Welk filter precies? (Bestandstype-chips, kolom-dropdowns, release, metadata-aanwezigheid, mappen, zoekbox)
-- In welk project en met welke filter-combinatie?
-- Screenshot/console-output
-
-**Verdachten:**
-- Werkt `resetFilters()` volledig na recente wijzigingen (includedExts, extChips)?
-- Combinatie metadata-filter + extensie-filter + map-selectie consistent?
-- Filter-dropdown voor dynamisch-EDITABLE velden werkt?
+Geen bekende open bugs. Filter-bug van 20 april (filters/zoek/groepering werkten pas na profielwissel) is opgelost in v3.3.
 
 ---
 
@@ -177,3 +182,8 @@ Voor de zekerheid genoteerd voor wie deze file later leest:
 - ~~Feature: Volledige metadata bij grote projecten~~ → opgelost in v3.2
 - ~~Bug: Metadata mist bij grote projecten (paginatie)~~ → opgelost in v3.2 deep-scan
 - ~~UI: 404-spam in browser-console~~ → opgelost in v3.2 via tc-proxy update
+- ~~Bug: Zoek/filter/groepering werkten pas na profielwissel~~ → opgelost in v3.3 (race condition tussen async hub-config en eerste render)
+- ~~Bug: Klik op bestand opent leeg tabblad (3D / PDF / link / bestandsnaam)~~ → opgelost in v3.3 (correcte viewer-deeplinks)
+- ~~Bug: Map-link (↗) in detail toonde lege verkenner~~ → opgelost in v3.3 (`/data/folder/{folderId}` URL-patroon)
+- ~~Bug: PDF-preview triggert download i.p.v. preview~~ → opgelost in v3.3 (MIME-fix + iframe-removal i.v.m. Chrome blob:-blok)
+- ~~Bug: Metadata-edits raken kwijt na hard refresh~~ → opgelost in v3.3 (UNION-merge in saveCell + localStorage-buffer)
