@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-05-05T23:55">
+<meta name="build" content="2026-05-08T13:00">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -2165,6 +2165,37 @@ function _applyPSetPropsToBestand(b, props, link) {
   }
 }
 
+// Soft-variant: zet alleen velden die nog leeg zijn op b. Velden die al een waarde
+// hebben blijven intact. Gebruikt door achtergrond-fetches (sanity check, revalidate)
+// om te voorkomen dat eventually-consistent /versions data een net-bewerkte waarde
+// overschrijft. Voor de canonical-bron-cases (eerste bulk-match, edits-buffer-merge,
+// changeset-response in saveCell) blijft de harde overschrijver.
+function _applyPSetPropsSoft(b, props, link) {
+  if (!props) return;
+  if (link && !b._psetLink) b._psetLink = link;
+  for (var propId in props) {
+    var veldNaam = PROP_MAP[propId];
+    if (!veldNaam) continue;
+    if (props[propId] === undefined || props[propId] === null || props[propId] === '--') continue;
+    if (b[veldNaam]) continue; // al gevuld — niet overschrijven met mogelijk-stale data
+    b[veldNaam] = String(props[propId]).trim();
+  }
+}
+
+// === EDIT-GUARD ===
+// Voorkomt dat achtergrond-rerenders de input vervangen waar de gebruiker net in typt.
+// Cell-inputs zetten _isEditing=true bij focus, false bij blur. Achtergrond-callers
+// gebruiken _safeRenderT() in plaats van renderT() — die wordt deferred tot blur.
+var _isEditing = false;
+var _pendingSafeRender = false;
+function _safeRenderT() {
+  if (_isEditing) { _pendingSafeRender = true; return; }
+  try { renderT(); } catch(_) {}
+}
+function _flushPendingRender() {
+  if (_pendingSafeRender) { _pendingSafeRender = false; try { renderT(); } catch(_) {} }
+}
+
 // Footer-indicator: blijft verborgen tijdens hoofd-scan (de banner bovenin toont al de voortgang).
 // Wordt alleen ingezet door _revalidateInBackground en de ✓-feedback aan het einde van de scan.
 function updateDeepScanUI() {
@@ -2237,10 +2268,9 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
     bestanden.length
   ); } catch(_) {}
 
-  // Re-render zodra cache hits al data hebben opgeleverd
-  if (cacheHits > 0) {
-    try { renderT(); } catch(_) {}
-  }
+  // Re-render zodra cache hits al data hebben opgeleverd. Edit-guard: skip als
+  // gebruiker in een cel typt (zou input vervangen → focus/tekst weg).
+  if (cacheHits > 0) { _safeRenderT(); }
 
   if (todo.length === 0) {
     _deepScan.actief = false;
@@ -2304,7 +2334,7 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
       // Periodieke UI-update
       if (sinceLastRender >= _DEEP_RERENDER_EVERY) {
         sinceLastRender = 0;
-        try { renderT(); } catch(_) {}
+        _safeRenderT();
         updateDeepScanUI();
         try { toonMetaWaarschuwingIndienNodig(
           bestanden.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; }).length,
@@ -2341,8 +2371,8 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
   // Edits-buffer opnieuw mergen — deep-scan kan instances binnenhalen die onze lokale
   // wijzigingen overschrijven (bv. revalidate-tak met stale TC-data).
   try { _editBufMergeIntoDocs(projectId, bestanden); } catch(_) {}
-  // Eind-render + banner-update
-  try { renderT(); } catch(_) {}
+  // Eind-render + banner-update (edit-guard: niet door bewerker heen)
+  _safeRenderT();
   try { toonMetaWaarschuwingIndienNodig(
     bestanden.filter(function(d) { return d.document_status || d.discipline || d.bedrijf || d.titel; }).length,
     bestanden.length
@@ -2430,7 +2460,9 @@ async function _revalidateInBackground(projectId, libId, files) {
             }
           }
           if (hasChange) {
-            _applyPSetPropsToBestand(b, newProps, link);
+            // Soft-apply: revalidate-data is /versions-based en kan stale zijn voor
+            // recent-bewerkte velden. Alleen lege velden invullen, niet overschrijven.
+            _applyPSetPropsSoft(b, newProps, link);
             _psetDeepCacheSet(projectId, vid, { props: newProps, status: 200 });
             changed++;
           } else if (newProps) {
@@ -2448,7 +2480,7 @@ async function _revalidateInBackground(projectId, libId, files) {
   for (var w = 0; w < concurrency; w++) workers.push(rv());
   await Promise.all(workers);
   console.log('[TC] Revalidatie klaar — ' + changed + ' wijzigingen ontdekt');
-  if (changed > 0) { try { renderT(); } catch(_) {} }
+  if (changed > 0) { _safeRenderT(); }
   if (ind) {
     ind.textContent = changed > 0 ? ('Bijgewerkt: ' + changed) : 'Actueel';
     ind.style.background = '#e7f4ec';
@@ -3423,6 +3455,8 @@ function renderT() {
             var sel = document.createElement('select');
             sel.style.cssText = 'width:100%;padding:2px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif';
             ENUM_VALUES[c.k].forEach(function(opt) { var o = document.createElement('option'); o.value = opt; o.textContent = opt; if (opt === v) o.selected = true; sel.appendChild(o); });
+            sel.onfocus = function() { _isEditing = true; };
+            sel.onblur = function() { _isEditing = false; _flushPendingRender(); };
             sel.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, sel.value, sel); };
             td.appendChild(sel);
           } else {
@@ -3434,6 +3468,10 @@ function renderT() {
             inp.style.cssText = 'width:100%;padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:10px;font-family:Poppins,sans-serif;box-sizing:border-box';
             inp.setAttribute('autocomplete', 'off');
             if (inp.type === 'text') inp.setAttribute('list', 'dl_' + c.k);
+            // Edit-guard: tijdens focus geen achtergrond-rerender (zou de input vervangen
+            // en focus + getypte tekst kwijtmaken). Pending render wordt op blur uitgevoerd.
+            inp.onfocus = function() { _isEditing = true; };
+            inp.onblur = function() { _isEditing = false; _flushPendingRender(); };
             inp.onchange = function(e) { e.stopPropagation(); saveCell(doc, c.k, inp.value, inp); };
             inp.onclick = function(e) { e.stopPropagation(); };
             td.appendChild(inp);
@@ -4530,11 +4568,12 @@ async function _sanityCheckPsetVersion(doc) {
   var items = body && Array.isArray(body.items) ? body.items : [];
   var inst = items.length > 0 ? items[0] : null;
   if (!inst || !inst.props) return;
-  // Cache vullen — als bulk eventually consistent een ander beeld geeft, valt de cache
-  // terug op deze /versions-snapshot. Lokale doc-state wordt bijgewerkt voor zichtbare
-  // velden in de UI.
-  if (typeof _applyPSetPropsToBestand === 'function') {
-    _applyPSetPropsToBestand(doc, inst.props, inst.link || link);
+  // Cache vullen voor toekomstige UNION-merges. Soft-apply op doc[] zodat we onze
+  // recente saveCell-write NIET overschrijven met /versions data — TC's /versions is
+  // eventually consistent en kan een oude waarde teruggeven binnen seconden na ons
+  // schrijven, wat zou leiden tot "tekst springt terug" voor de gebruiker.
+  if (typeof _applyPSetPropsSoft === 'function') {
+    _applyPSetPropsSoft(doc, inst.props, inst.link || link);
   }
   _psetDeepCacheSet(pid, doc._vid, { props: inst.props, status: 200 });
   // BEWUST GEEN _editBufSet hier: /versions kan minder velden retourneren dan onze
@@ -4561,8 +4600,8 @@ async function _sanityCheckPsetVersion(doc) {
     if (fn2 && inst.props[p]) { sample.push(fn2 + '="' + inst.props[p] + '"'); if (sample.length >= 4) break; }
   }
   console.log('[TC] Sanity check via /versions: ' + doc.bestandsnaam + ' — ' + Object.keys(inst.props).length + ' velden in TC: ' + sample.join(', ') + (sample.length >= 4 ? ', ...' : ''));
-  // Re-render zodat eventuele divergentie tussen doc[] en saveCell-update zichtbaar wordt
-  try { renderT(); } catch(_) {}
+  // Re-render via edit-guard: als gebruiker net in een cel typt, defer tot blur
+  _safeRenderT();
 }
 
 // === DELEN ===
