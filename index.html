@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="build" content="2026-05-08T13:00">
+<meta name="build" content="2026-05-13T11:30">
 <title>Documentenlijst Viewer | At Fielt</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
@@ -508,7 +508,7 @@ td a:hover{color:var(--af);text-decoration:underline}
       <div class="tbl-scrl"><table><colgroup id="tColGroup"></colgroup><thead id="tHead"></thead><tbody id="tBody"></tbody></table><div class="no-r" id="noR" style="display:none">Geen documenten gevonden</div></div>
       <div class="dpan" id="dPan"><div class="dp-hd" id="dpHd"><div style="display:flex;justify-content:space-between;align-items:start"><h3></h3><span onclick="document.getElementById('dPan').classList.remove('vis');selDoc=null;renderT();" style="cursor:pointer;font-size:18px;opacity:.5;padding:0 4px" title="Sluiten">&times;</span></div><div class="dp-path"></div></div><div id="dpCnt"></div></div>
     </div>
-    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500;transition:background 0.3s,color 0.3s" title="Metadata wordt op de achtergrond aangevuld voor bestanden die niet in de eerste batch zaten"></span><button class="diag-btn" onclick="vernieuwClicked(this)" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
+    <div class="ftr"><span id="ftr1"></span><span style="font-weight:600;color:var(--af)">&#128279; Links openen altijd de laatste versie</span><span id="ftr2"></span><span id="deepScanIndicator" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#eef3f8;color:#365a82;border-radius:12px;font-size:12px;font-weight:500;transition:background 0.3s,color 0.3s" title="Metadata wordt op de achtergrond aangevuld voor bestanden die niet in de eerste batch zaten"></span><button class="diag-btn" onclick="vernieuwClicked(this)" title="Nu controleren op nieuwe documenten">&#8635; Vernieuwen</button><button class="diag-btn" onclick="cacheLegenClicked(this)" title="Wis lokale metadata-cache voor dit project en haal alles opnieuw op uit Trimble Connect (gebruik dit als metadata-velden leeg lijken terwijl ze in TC wel ingevuld zijn)">&#9851; Cache wissen</button><button class="diag-btn" onclick="kopieerDiagnose(this)" title="Kopieer diagnose-rapport naar klembord (voor support)">&#9432; Diagnose</button></div>
   </div>
 </div>
 
@@ -2005,7 +2005,8 @@ function applyMetaSchemaUI() {
 // Cloudflare daily-limit aanleiding: 2026-04-28.
 
 var _deepScan = null; // { actief, totaal, gedaan, succes, leeg, fout, cacheHit, startTs }
-var _DEEP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 uur — hard expire
+var _DEEP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 uur — hard expire voor status 200 (echte props)
+var _DEEP_CACHE_TTL_404_MS = 5 * 60 * 1000;    // 5 min — 404's veranderen sneller (na een edit krijgt een bestand wel data)
 var _DEEP_CACHE_FRESH_MS = 2 * 60 * 1000;     // < 2 min = geen revalidate (echte besparing)
 var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
@@ -2087,26 +2088,31 @@ function _editBufMergeIntoDocs(projId, bestanden) {
 }
 
 function _psetDeepCacheKey(projId, vid) {
-  // V3: bumped 2026-04-29 — V2 entries cachen 404 onder versionId (verkeerde key) ipv vid;
-  // alle 82 release-files in 00167 stonden ten onrechte als 404 in cache. Nieuwe prefix invalided alles.
-  return 'psetDeepV3:' + projId + ':' + vid;
+  // V4: bumped 2026-05-08 — V3-entries kunnen stale 404's bevatten voor bestanden die
+  // via TC native UI metadata hebben gekregen. Onze /versions-endpoint geeft soms 404
+  // voor zulke bestanden, dus die 404's leefden tot 24u in localStorage. Nieuwe prefix
+  // invalided alles in één klap.
+  return 'psetDeepV4:' + projId + ':' + vid;
 }
 // Eenmalige cleanup van permanent-stale cache-entries uit oudere versies.
-// V1 (`psetDeep:`) cachte 404's voor /tcfiles endpoint zonder /versions suffix.
-// V2 (`psetDeepV2:`) cachte 404's onder versionId-keys ipv vid.
-// Beide bevatten geen bruikbare data meer. Opruimen scheelt localStorage-ruimte.
+// V1 (`psetDeep:`)   — 404's voor /tcfiles endpoint zonder /versions suffix.
+// V2 (`psetDeepV2:`) — 404's onder versionId-keys ipv vid.
+// V3 (`psetDeepV3:`) — 404's bleven 24u staan voor bestanden die intussen metadata kregen.
+// Allemaal weghalen — scheelt localStorage-ruimte en voorkomt verwarring.
 (function _cleanupOldPsetCaches() {
   try {
     for (var i = localStorage.length - 1; i >= 0; i--) {
       var k = localStorage.key(i);
       if (!k) continue;
-      if (k.indexOf('psetDeep:') === 0 || k.indexOf('psetDeepV2:') === 0) {
+      if (k.indexOf('psetDeep:') === 0 || k.indexOf('psetDeepV2:') === 0 || k.indexOf('psetDeepV3:') === 0) {
         localStorage.removeItem(k);
       }
     }
   } catch(_) { /* niet fataal */ }
 })();
 // Returnt {props, status, age} of null. Caller bepaalt op basis van age of revalidatie nodig is.
+// 404/204 entries (geen-metadata) hebben een kortere TTL dan 200-entries — wanneer iemand
+// een bestand voor het eerst metadata geeft, willen we niet 24u op een stale 404 blijven hangen.
 function _psetDeepCacheGet(projId, vid) {
   try {
     var raw = localStorage.getItem(_psetDeepCacheKey(projId, vid));
@@ -2114,7 +2120,9 @@ function _psetDeepCacheGet(projId, vid) {
     var obj = JSON.parse(raw);
     if (!obj || typeof obj.ts !== 'number') return null;
     var age = Date.now() - obj.ts;
-    if (age > _DEEP_CACHE_TTL_MS) {
+    var isNoData = (obj.status === 404 || obj.status === 204) || !obj.props || !Object.keys(obj.props).length;
+    var maxAge = isNoData ? _DEEP_CACHE_TTL_404_MS : _DEEP_CACHE_TTL_MS;
+    if (age > maxAge) {
       try { localStorage.removeItem(_psetDeepCacheKey(projId, vid)); } catch(_) {}
       return null;
     }
@@ -2816,6 +2824,39 @@ function setupAutoRefresh() {
 
 // Wrapper rond checkForUpdates die de footer-knop visuele feedback geeft.
 // Anders lijkt de knop niets te doen wanneer er geen nieuwe documenten zijn.
+// Wis lokale PSet-cache voor het huidige project en trigger een volledige re-fetch.
+// Gebruik dit als metadata-velden in de extensie leeg lijken terwijl ze in Trimble
+// Connect wél ingevuld zijn — meestal het gevolg van stale cache-entries (TC's
+// per-bestand API kan 404 geven voor bestanden die intussen wél metadata kregen).
+async function cacheLegenClicked(btn) {
+  if (!btn || !pid) return;
+  if (!confirm('Cache wissen voor dit project?\n\nAlle metadata wordt opnieuw uit Trimble Connect gehaald. Dit duurt enkele seconden tot een minuut afhankelijk van projectgrootte.\n\nLokale niet-opgeslagen wijzigingen blijven behouden via de edits-buffer.')) return;
+  var origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '&#9851; Bezig...';
+  try {
+    // Wis PSet deep-cache voor dit project (alleen de project-specifieke entries)
+    var prefix = 'psetDeepV4:' + pid + ':';
+    var aantalGewist = 0;
+    for (var i = localStorage.length - 1; i >= 0; i--) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(prefix) === 0) { localStorage.removeItem(k); aantalGewist++; }
+    }
+    // PSet-schema-cache ook wissen — dwingt een verse fetch van PROP_MAP/i18n
+    try { localStorage.removeItem('tc-viewer-psetdef:' + pid); } catch(_) {}
+    console.log('[TC] Cache gewist: ' + aantalGewist + ' deep-cache entries voor project ' + pid);
+    // Trigger een volledige re-fetch via tcAutoFetchData
+    btn.innerHTML = '&#8635; Vernieuwen...';
+    await tcAutoFetchData();
+    btn.innerHTML = '&#10003; Klaar';
+    setTimeout(function() { btn.innerHTML = origText; btn.disabled = false; }, 2500);
+  } catch(e) {
+    console.warn('[TC] Cache wissen mislukt:', e && e.message);
+    btn.innerHTML = '&#9888; Mislukt';
+    setTimeout(function() { btn.innerHTML = origText; btn.disabled = false; }, 2500);
+  }
+}
+
 async function vernieuwClicked(btn) {
   if (!btn) return;
   var origText = btn.innerHTML;
