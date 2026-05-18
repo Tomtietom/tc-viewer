@@ -2052,8 +2052,11 @@ function applyMetaSchemaUI() {
 // Cloudflare daily-limit aanleiding: 2026-04-28.
 
 var _deepScan = null; // { actief, totaal, gedaan, succes, leeg, fout, cacheHit, startTs }
-var _DEEP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 uur — hard expire voor status 200 (echte props)
-var _DEEP_CACHE_TTL_404_MS = 5 * 60 * 1000;    // 5 min — 404's veranderen sneller (na een edit krijgt een bestand wel data)
+var _DEEP_CACHE_TTL_MS = 4 * 60 * 60 * 1000;  // 4 uur — verkort van 24u (mei 18 2026, Stadlander-incident).
+                                              // TC's bulk-endpoint cap't op 100 instances; docs buiten die top-100 bleven
+                                              // 24u onleesbaar achter een stale cache wanneer ze in TC native gewijzigd
+                                              // werden. 4u = max stale-window tussen TC-edit en zichtbaarheid in viewer.
+var _DEEP_CACHE_TTL_404_MS = 5 * 60 * 1000;   // 5 min — 404's veranderen sneller (na een edit krijgt een bestand wel data)
 var _DEEP_CACHE_FRESH_MS = 2 * 60 * 1000;     // < 2 min = geen revalidate (echte besparing)
 var _DEEP_RERENDER_EVERY = 50; // re-render UI elke N voltooide calls
 var _DEEP_CONCURRENCY = 10;
