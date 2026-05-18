@@ -1907,6 +1907,53 @@ async function tcGetMetadata(projectId, bestanden) {
   _metaDiag.matchedByName = matchedByName;
   console.log('[TC] Metadata gematcht: ' + matched + ' van ' + instArray.length + ' instances (via vid=' + matchedByVid + ', version=' + matchedByVersion + ', name=' + matchedByName + ')');
 
+  // Auto-detectie cache-corruption (mei 2026): voor docs waar bulk WEL mapped metadata gaf,
+  // check of de deep-cache 'leeg' beweerde. Bij ≥5 zulke gevallen: blow hele project-cache.
+  // Probleem-oorzaak: eerdere deep-scan kreeg 200-met-niet-gemapped-props → cache 24u →
+  // metadata blijft 'verborgen' terwijl bulk-loop hem nu wel kent. Veroorzaakte verloren
+  // klant-vertrouwen bij Stadlander Molenvliet (943 docs, slechts 305 met meta zichtbaar).
+  try {
+    var cacheLiedFor = 0;
+    var examplesLied = [];
+    bestanden.forEach(function(b) {
+      if (!b._vid) return;
+      // Heeft bulk dit bestand mapped metadata gegeven?
+      var hasMapped = false;
+      for (var propId in PROP_MAP) {
+        var veld = PROP_MAP[propId];
+        if (b[veld]) { hasMapped = true; break; }
+      }
+      if (!hasMapped) return;
+      var cached = _psetDeepCacheGet(projectId, b._vid);
+      if (!cached) return;
+      // Cache liegt als status != 200 OF props zonder ENKEL mapped veld
+      var cachedHasMapped = false;
+      if (cached.status === 200 && cached.props) {
+        for (var k in cached.props) {
+          if (PROP_MAP[k] && cached.props[k] && cached.props[k] !== '--') { cachedHasMapped = true; break; }
+        }
+      }
+      if (!cachedHasMapped) {
+        cacheLiedFor++;
+        if (examplesLied.length < 3) examplesLied.push(b.bestandsnaam || b._vid);
+      }
+    });
+    _metaDiag.cacheLiedFor = cacheLiedFor;
+    if (cacheLiedFor >= 5) {
+      console.warn('[TC] cache-corruption gedetecteerd:', cacheLiedFor, 'docs werden ten onrechte als leeg gecached. Voorbeelden:', examplesLied, '— wis hele project-cache + volledige rescan');
+      var prefix = _psetDeepCacheKey(projectId, '___SENTINEL___').replace(':___SENTINEL___', ':');
+      var wiped = 0;
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var lk = localStorage.key(i);
+        if (lk && lk.indexOf(prefix) === 0) { localStorage.removeItem(lk); wiped++; }
+      }
+      console.log('[TC] cache-corruption: ' + wiped + ' cache-entries gewist voor dit project; deep-scan zal álles opnieuw ophalen');
+      _metaDiag.cacheCorruptionWiped = wiped;
+    }
+  } catch(e) {
+    console.warn('[TC] cache-corruption check fout (niet fataal):', e && e.message);
+  }
+
   // Compacte samenvatting: hoeveel bestanden hebben metadata, hoeveel zijn legacy
   var pctMetMeta = bestanden.length > 0 ? Math.round(matched / bestanden.length * 100) : 0;
   var legacyInstances = (instArray.length - matched);
@@ -2134,9 +2181,21 @@ function _psetDeepCacheSet(projId, vid, data) {
     if (data === null) {
       localStorage.removeItem(_psetDeepCacheKey(projId, vid));
     } else {
+      // Anti-corruption (mei 2026): als props bestaan maar geen ENKELE prop is gemapped in
+      // PROP_MAP, is deze entry voor onze UI effectief 'leeg' → status 204 (no-content) zodat
+      // de kortere TTL geldt. Voorkomt 24u "geen metadata zichtbaar" voor docs die TC met
+      // niet-gemapped systeem-props retourneert.
+      var effectiveStatus = data.status || 200;
+      if (effectiveStatus === 200 && data.props && typeof data.props === 'object') {
+        var hasMapped = false;
+        for (var k in data.props) {
+          if (PROP_MAP[k] && data.props[k] && data.props[k] !== '--') { hasMapped = true; break; }
+        }
+        if (!hasMapped) effectiveStatus = 204;
+      }
       localStorage.setItem(_psetDeepCacheKey(projId, vid), JSON.stringify({
         props: data.props || null,
-        status: data.status || 200,
+        status: effectiveStatus,
         ts: Date.now()
       }));
     }
@@ -4033,6 +4092,11 @@ function kopieerDiagnose(btn) {
     tekst += ' (duur: ' + d.deepScan.duurSec + 's)\n';
   } else if (_deepScan && _deepScan.actief) {
     tekst += 'Deep-scan: nog bezig — ' + _deepScan.gedaan + '/' + _deepScan.totaal + ' klaar\n';
+  }
+  if (d.cacheLiedFor != null) {
+    tekst += 'Cache-corruption check: ' + d.cacheLiedFor + ' docs werden ten onrechte als leeg gecached';
+    if (d.cacheCorruptionWiped != null) tekst += ' → automatisch ' + d.cacheCorruptionWiped + ' entries gewist';
+    tekst += '\n';
   }
   tekst += '\n';
   if (d.unmatched && d.unmatched.length) {

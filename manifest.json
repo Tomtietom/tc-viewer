@@ -1,9 +1,12 @@
 {
   "title": "Documentenlijst Viewer",
   "url": "https://tomtietom.github.io/tc-viewer/",
-  "icon": "https://tomtietom.github.io/tc-viewer/icon.png",
+  "icon": "https://tomtietom.github.io/tc-viewer/icon.svg",
   "description": "Documentenlijst met metadata — At Fielt",
   "infoUrl": "https://tomtietom.github.io/tc-viewer/",
-  "extensionType": ["project"],
+  "extensionType": [
+    "project"
+  ],
+  "configCommand": "open_settings",
   "enabled": true
 }
