@@ -2160,7 +2160,9 @@ function _psetDeepCacheKey(projId, vid) {
   // via TC native UI metadata hebben gekregen. Onze /versions-endpoint geeft soms 404
   // voor zulke bestanden, dus die 404's leefden tot 24u in localStorage. Nieuwe prefix
   // invalided alles in één klap.
-  return 'psetDeepV4:' + projId + ':' + vid;
+  // V5: bumped 2026-05-21 — V4-entries bevatten items[0] stale data (oudste PSet versie).
+  // Vanaf nu pakken we items[N-1] / max(v). Nieuwe prefix invalided alle V4-caches.
+  return 'psetDeepV5:' + projId + ':' + vid;
 }
 // Eenmalige cleanup van permanent-stale cache-entries uit oudere versies.
 // V1 (`psetDeep:`)   — 404's voor /tcfiles endpoint zonder /versions suffix.
