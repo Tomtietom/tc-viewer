@@ -2,11 +2,25 @@
 
 Open punten en ideeën voor volgende sessies. Geprioriteerd op impact.
 
-Laatst bijgewerkt: 2026-05-06.
+Laatst bijgewerkt: 2026-05-21.
 
 ---
 
 ## ✅ Recent afgerond (referentie)
+
+Opgenomen in v3.4 (21 mei 2026) — **kritieke klant-impact-fix Rico-incident**:
+
+**Root cause stale metadata** (Stadlander Molenvliet, sluimerende bug 16+ maanden):
+- **`/versions` items[] is ASCENDING gesorteerd** — items[0] = oudste/initiële PSet (zonder `v` veld), items[N-1] = nieuwste. Onze code pakte permanent items[0] → toonde de originele waarde uit de file-creatie i.p.v. de laatste edit. Elke wijziging (via TC native UI én via tc-viewer) leek te verdwijnen na cache-refresh.
+- Empirisch bewezen via tijdelijke `window.__dl_debug_pset(filenameFragment)` debug-tool in cockpit-broertje. Voor TTP-UO-102 in DigitaalBouwen@VolkerWessels: 7 items in respons, items[0] "Deze staat in de root" (origineel), items[6] "Aangepast in TC native" (laatste TC-edit). Code pakte permanent items[0].
+- Fix: nieuwe `_pickLatestItem(items)` helper sorteert op `v` desc, valt terug op array-volgorde. Gebruikt in deep-scan (`_deepScanPSet` regel ~2377) én `_revalidateInBackground` (regel ~2518). Plus debug-logging eerste 5 multi-version files per scan: `[TC] /versions items>1 voor X — gekozen v=N van M items`.
+- **Cache-prefix bumped V4→V5** (`psetDeepV5:`) — alle bestaande klant-caches met items[0]-stale data worden automatisch genegeerd bij eerste tab-restart na deploy. Geen handmatige "Cache wissen" nodig om de fix te activeren.
+
+**Klantenimpact**: Rico's TC-native-edits verschijnen direct in de viewer na tab-restart. Eigen tc-viewer-saves blijven correct staan. Alle bestanden die ooit zijn bewerkt (in groot project mogelijk honderden) tonen vanaf nu de juiste metadata.
+
+**Standalone bevriezing-uitzondering**: deze fix is uitgevoerd ondanks de bevriezing-status (zie cockpit-roadmap), omdat het een kritieke klant-impact-fix is. Cockpit DL kreeg dezelfde fix tegelijk (commit `a2bd1a9`).
+
+---
 
 Opgenomen in v3.3 (mei 2026):
 
