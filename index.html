@@ -1203,6 +1203,24 @@ async function tcFetchV21(path, opts) {
   try { return JSON.parse(txt); } catch(_) { return txt; }
 }
 
+// Selecteer "nieuwste" item uit /versions response. items[] is empirisch ASCENDING
+// gesorteerd door TC's PSet API (items[0] = oudste/initiële, items[N-1] = nieuwste).
+// Bewijs (debug-tool mei 21 2026 op TTP-UO-102): items[0] heeft geen `v` veld en de
+// originele waarde; items[1..N] hebben v=1..N met opeenvolgende edits. items[6] was
+// de TC-native-edit "Aangepast in TC native", items[0] was "Deze staat in de root".
+// We sorteren op `v` desc om de nieuwste te kiezen. Eerdere code pakte items[0] →
+// toonde permanent stale data en deed elke edit (cockpit én TC-native) lijken te
+// verdwijnen — root cause van Rico's klant-incident.
+function _pickLatestItem(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (items.length === 1) return items[0];
+  return items.slice().sort(function(a, b) {
+    var av = Number((a && a.v) || 0);
+    var bv = Number((b && b.v) || 0);
+    return bv - av;
+  })[0];
+}
+
 async function tcFetchPSet(path, opts) {
   opts = opts || {};
   await _ensureValidToken();
@@ -2374,7 +2392,11 @@ async function tcGetMetadataDeep(projectId, libId, bestanden) {
             _deepScan.leeg++;
           } else {
             var items = body && Array.isArray(body.items) ? body.items : [];
-            var inst = items.length > 0 ? items[0] : null;
+            // items[0] is OUDSTE versie (TC's /versions is ascending). Sorteer op v desc.
+            var inst = _pickLatestItem(items);
+            if (items.length > 1 && _deepScan.gedaan < 5) {
+              console.log('[TC] /versions items>1 voor', b.bestandsnaam, '— gekozen v=' + (inst && inst.v != null ? inst.v : '?') + ' van', items.length, 'items');
+            }
             if (inst && inst.props) {
               _applyPSetPropsToBestand(b, inst.props, inst.link || link);
               _psetDeepCacheSet(projectId, vid, { props: inst.props, status: 200 });
@@ -2515,7 +2537,8 @@ async function _revalidateInBackground(projectId, libId, files) {
           var inst = null;
           if (body && body.found !== false) {
             var items = Array.isArray(body.items) ? body.items : [];
-            inst = items.length > 0 ? items[0] : null;
+            // items[0] is OUDSTE versie (TC's /versions is ascending). Sorteer op v desc.
+            inst = _pickLatestItem(items);
           }
           var newProps = (inst && inst.props) ? inst.props : null;
           var hasChange = false;
@@ -2530,8 +2553,10 @@ async function _revalidateInBackground(projectId, libId, files) {
             }
           }
           if (hasChange) {
-            // Soft-apply: revalidate-data is /versions-based en kan stale zijn voor
-            // recent-bewerkte velden. Alleen lege velden invullen, niet overschrijven.
+            // Soft-apply: behouden als veiligheidsnet voor race conditions
+            // (cockpit-save < 1s geleden vs revalidatie-fetch). _pickLatestItem
+            // pakt nu de juiste versie (was items[0]=oudste bug), maar soft-apply
+            // voorkomt nog steeds overwrite van net-gesaved-fields.
             _applyPSetPropsSoft(b, newProps, link);
             _psetDeepCacheSet(projectId, vid, { props: newProps, status: 200 });
             changed++;
